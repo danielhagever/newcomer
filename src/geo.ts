@@ -12,7 +12,8 @@ export async function neighborhoodName(cache: KVNamespace, lat: number, lon: num
     });
     const d: any = await res.json();
     const p = d.features?.[0]?.properties ?? {};
-    name = p.district ?? p.locality ?? p.suburb ?? p.street ?? p.city ?? "";
+    // Prefer real neighborhood-level names; a street is labelled as such rather than passed off as a neighborhood.
+    name = p.district ?? p.locality ?? p.suburb ?? (p.street ? `around ${p.street}` : (p.city ?? ""));
   } catch {}
   if (name) await cache.put(key, name, { expirationTtl: 60 * 60 * 24 * 30 });
   return name || `${lat.toFixed(3)}, ${lon.toFixed(3)}`;
