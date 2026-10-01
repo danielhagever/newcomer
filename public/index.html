@@ -81,6 +81,7 @@
     </div>
     <div class="card" id="progress" hidden>
       <h2>Working on it</h2>
+      <div id="understood" style="margin-bottom:8px"></div>
       <ul class="steps" id="steps"></ul>
     </div>
     <div id="results"></div>
@@ -116,7 +117,10 @@ $("chips").addEventListener("click", (e) => { const c = e.target.closest(".chip"
 $("go").onclick = async () => {
   $("go").disabled = true; $("results").innerHTML = ""; showProgress();
   try {
-    const r = await fetch("/api/match", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ city: $("city").value, text: $("text").value }) });
+    const parsed = await (await fetch("/api/parse", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: $("text").value }) })).json();
+    const KIND = { artist: "artist", movie: "film", tv_show: "TV show", book: "book", podcast: "podcast", video_game: "game", brand: "brand", place: "place", tag: "taste" };
+    $("understood").innerHTML = (parsed.interests || []).map((i) => `<span class="tag">${esc(i.name)} · ${esc(KIND[i.kind] || "interest")}</span>`).join("");
+    const r = await fetch("/api/match", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ city: $("city").value, interests: parsed.interests }) });
     const d = await r.json();
     doneProgress();
     if (d.error) { $("results").innerHTML = `<div class="card"><b>Couldn't finish.</b> ${esc(d.error)}</div>`; return; }

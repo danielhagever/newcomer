@@ -31,7 +31,10 @@ async function parseInterests(env: Env, text: string): Promise<Interest[]> {
         max_tokens: 400,
       } as any,
     );
-    const raw = String(out?.response ?? out?.choices?.[0]?.message?.content ?? "");
+    const rawVal = out?.response ?? out?.choices?.[0]?.message?.content ?? "";
+    // Some models return the JSON already parsed.
+    const raw = typeof rawVal === "string" ? rawVal : JSON.stringify(rawVal);
+    (globalThis as any).__lastParseRaw = raw.slice(0, 600);
     const m = raw.match(/\{[\s\S]*\}/);
     const parsed = m ? JSON.parse(m[0]) : null;
     const list: Interest[] = (parsed?.interests ?? [])
@@ -110,6 +113,12 @@ export default {
     const url = new URL(req.url);
     if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return createMcpHandler(() => buildServer(env)).fetch(req);
     if (url.pathname === "/api/status") return json({ qloo: !!env.QLOO_API_KEY });
+    if (url.pathname === "/api/parse" && req.method === "POST") {
+      const body = (await req.json().catch(() => null)) as { text?: string } | null;
+      if (!body?.text) return json({ error: "text required" }, 400);
+      const interests = await parseInterests(env, body.text);
+      return json({ interests, ...(url.searchParams.get("debug") ? { raw: (globalThis as any).__lastParseRaw ?? null } : {}) });
+    }
     if (url.pathname === "/api/match" && req.method === "POST") {
       const body = (await req.json().catch(() => null)) as { city?: string; text?: string; interests?: Interest[] } | null;
       if (!body?.city || (!body.text && !body.interests?.length)) return json({ error: "city and text (or interests) are required" }, 400);
