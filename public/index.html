@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Newcomer</title>
+<meta name="description" content="Moving to a new city? Newcomer finds the neighborhoods that already like what you like, with the evidence, using Qloo's taste graph.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root { --bg:#f6f2ea; --paper:#fffdf8; --ink:#1d2321; --mute:#6c726e; --line:#e4ddd0; --accent:#0f766e; --accent2:#e07a2f; --soft:#e8f3f1; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 Inter, system-ui, sans-serif; }
+  a { color:var(--accent); }
+  header { max-width:1240px; margin:0 auto; padding:28px 16px 8px; }
+  .brand { font:700 15px Inter; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); }
+  h1 { font-family:Fraunces, Georgia, serif; font-weight:700; font-size:clamp(30px,4.2vw,50px); line-height:1.08; margin:8px 0 8px; letter-spacing:-.01em; max-width:820px; }
+  .lede { color:var(--mute); font-size:17px; max-width:720px; margin:0; }
+  main { max-width:1240px; margin:0 auto; padding:18px 16px 60px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.05fr); gap:22px; align-items:start; }
+  @media (max-width: 960px) { main { grid-template-columns:1fr; } #mapWrap { position:relative !important; top:auto !important; } }
+  .card { background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:18px; margin-bottom:16px; }
+  label { font-weight:600; font-size:13px; display:block; margin:0 0 6px; }
+  input, textarea { width:100%; font:inherit; background:#fff; border:1px solid var(--line); border-radius:12px; padding:11px 13px; color:var(--ink); }
+  textarea { min-height:86px; resize:vertical; }
+  .row { display:grid; grid-template-columns: 1fr; gap:12px; }
+  .chips { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; }
+  .chip { border:1px solid var(--line); background:#fff; border-radius:999px; padding:5px 11px; font-size:12.5px; cursor:pointer; color:var(--mute); }
+  .chip:hover { border-color:var(--accent); color:var(--ink); }
+  .go { margin-top:14px; width:100%; background:var(--ink); color:#fff; border:0; border-radius:12px; padding:13px; font:600 15px Inter; cursor:pointer; }
+  .go:disabled { opacity:.5; cursor:default; }
+  .banner { background:#fff3e6; border:1px solid #f3d3b4; color:#7a4515; border-radius:12px; padding:10px 12px; font-size:13.5px; margin-bottom:12px; }
+  .steps { list-style:none; padding:0; margin:0; }
+  .steps li { padding:6px 0 6px 26px; position:relative; color:var(--mute); }
+  .steps li::before { content:""; position:absolute; left:4px; top:12px; width:10px; height:10px; border-radius:50%; border:2px solid var(--line); }
+  .steps li.done { color:var(--ink); } .steps li.done::before { background:var(--accent); border-color:var(--accent); }
+  .steps li.now::before { border-color:var(--accent2); animation:pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity:.3; } }
+  .hood { border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:12px; background:#fff; cursor:pointer; }
+  .hood:hover { border-color:var(--accent); }
+  .hood h3 { font-family:Fraunces, Georgia, serif; font-size:22px; margin:0; display:flex; align-items:baseline; gap:10px; }
+  .rank { font:600 13px Inter; color:var(--accent2); }
+  .bar { height:7px; background:var(--soft); border-radius:6px; overflow:hidden; margin:8px 0 10px; }
+  .bar i { display:block; height:100%; background:linear-gradient(90deg, var(--accent), #34a39a); border-radius:6px; }
+  .ev { font-size:13.5px; padding:4px 0; border-top:1px dashed var(--line); }
+  .ev:first-of-type { border-top:0; }
+  .m { color:var(--mute); font-size:12.5px; }
+  .tag { display:inline-block; background:var(--soft); color:var(--accent); border-radius:999px; padding:1px 8px; font-size:11.5px; margin:2px 4px 0 0; }
+  #mapWrap { position:sticky; top:16px; }
+  #map { height:560px; border-radius:16px; border:1px solid var(--line); }
+  h2 { font-family:Fraunces, Georgia, serif; font-size:22px; margin:0 0 10px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  td, th { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  code { background:#f1ece2; padding:1px 5px; border-radius:5px; font-size:12px; word-break:break-all; }
+  .summary { font-family:Fraunces, Georgia, serif; font-size:21px; line-height:1.35; margin:0 0 12px; }
+  footer { max-width:1240px; margin:0 auto; padding:0 16px 40px; color:var(--mute); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Newcomer</div>
+  <h1>Moving to a new city? Find the neighborhood that already likes what you like.</h1>
+  <p class="lede">Tell Newcomer what you love. It asks Qloo's taste graph where people who share those tastes concentrate, names the neighborhoods, shows the places that prove it, and plans a weekend to test the move before you sign a lease.</p>
+</header>
+<main>
+  <div>
+    <div class="card">
+      <div id="banner" class="banner" hidden></div>
+      <div class="row">
+        <div><label for="city">Moving to</label><input id="city" value="Austin, Texas" autocomplete="off"></div>
+        <div><label for="text">What do you love?</label>
+          <textarea id="text">Phoebe Bridgers, The Bear, ramen, bouldering, natural wine</textarea>
+          <div class="chips" id="chips">
+            <span class="chip" data-city="Chicago, Illinois" data-text="Taylor Swift, Gilmore Girls, brunch, yoga, farmers markets">Chicago: Taylor Swift, Gilmore Girls, brunch</span>
+            <span class="chip" data-city="Los Angeles, California" data-text="Kendrick Lamar, Dune, tacos, skateboarding, vinyl records">LA: Kendrick Lamar, Dune, tacos</span>
+            <span class="chip" data-city="Brooklyn, New York" data-text="Radiohead, Succession, jazz, bookstores, specialty coffee">Brooklyn: Radiohead, Succession, jazz</span>
+          </div>
+        </div>
+      </div>
+      <button class="go" id="go">Find my neighborhood</button>
+    </div>
+    <div class="card" id="progress" hidden>
+      <h2>Working on it</h2>
+      <ul class="steps" id="steps"></ul>
+    </div>
+    <div id="results"></div>
+  </div>
+  <div id="mapWrap"><div id="map"></div><p class="m" style="margin:8px 4px">Map data © OpenStreetMap contributors. Teal circles are neighborhoods, sized by taste match; orange dots are evidence places.</p></div>
+</main>
+<footer>Newcomer uses Qloo for taste data, Open-Meteo for geocoding and OpenStreetMap (Photon) for neighborhood names. Qloo results describe what groups of people tend to like, not what one person will do. For AI agents: an MCP server is available at <code id="mcpUrl"></code>.</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+$("mcpUrl").textContent = `${location.origin}/mcp`;
+const map = L.map("map", { scrollWheelZoom: false }).setView([30.2672, -97.7431], 11);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap contributors" }).addTo(map);
+let layer = L.layerGroup().addTo(map);
+
+const STEPS = ["Understanding your taste", "Asking Qloo where people like you concentrate", "Naming the neighborhoods", "Finding the places that prove it", "Planning your scouting weekend"];
+let timer;
+function showProgress() {
+  $("progress").hidden = false; let i = 0;
+  const draw = () => { $("steps").innerHTML = STEPS.map((s, j) => `<li class="${j < i ? "done" : j === i ? "now" : ""}">${s}</li>`).join(""); };
+  draw(); clearInterval(timer); timer = setInterval(() => { if (i < STEPS.length - 1) { i++; draw(); } }, 1800);
+}
+function doneProgress() { clearInterval(timer); $("steps").innerHTML = STEPS.map((s) => `<li class="done">${s}</li>`).join(""); }
+
+fetch("/api/status").then((r) => r.json()).then((s) => {
+  if (!s.qloo) { $("banner").hidden = false; $("banner").textContent = "Live Qloo access is being set up. Searches will work as soon as the hackathon API key is active."; }
+});
+
+$("chips").addEventListener("click", (e) => { const c = e.target.closest(".chip"); if (!c) return; $("city").value = c.dataset.city; $("text").value = c.dataset.text; });
+
+$("go").onclick = async () => {
+  $("go").disabled = true; $("results").innerHTML = ""; showProgress();
+  try {
+    const r = await fetch("/api/match", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ city: $("city").value, text: $("text").value }) });
+    const d = await r.json();
+    doneProgress();
+    if (d.error) { $("results").innerHTML = `<div class="card"><b>Couldn't finish.</b> ${esc(d.error)}</div>`; return; }
+    render(d);
+  } catch (e) {
+    $("results").innerHTML = `<div class="card">Something went wrong. Please try again.</div>`;
+  } finally { $("go").disabled = false; }
+};
+
+function render(d) {
+  const max = Math.max(...d.neighborhoods.map((h) => h.affinity), 0.0001);
+  const hoods = d.neighborhoods.map((h, i) => `
+    <div class="hood" data-lat="${h.lat}" data-lon="${h.lon}">
+      <h3><span class="rank">#${i + 1}</span>${esc(h.name)}</h3>
+      <div class="bar"><i style="width:${Math.round((h.affinity / max) * 100)}%"></i></div>
+      <div class="m">Taste match ${(h.affinity * 100).toFixed(0)} (Qloo affinity, ${h.cells} map cell${h.cells === 1 ? "" : "s"})</div>
+      ${h.evidence.length ? `<div style="margin-top:8px">${h.evidence.map((e) => `<div class="ev"><b>${esc(e.name)}</b>${e.address ? ` <span class="m">· ${esc(e.address)}</span>` : ""}<div>${(e.tags || []).slice(0, 4).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div></div>`).join("")}</div>` : ""}
+    </div>`).join("");
+  const weekend = d.weekend.map((w) => `<div style="margin-bottom:10px"><b>${esc(w.day)} in ${esc(w.neighborhood)}</b>${w.stops.map((s) => `<div class="ev"><span class="tag">${esc(s.when)}</span> ${esc(s.place)}${s.why ? ` <span class="m">· ${esc(s.why)}</span>` : ""}</div>`).join("")}</div>`).join("");
+  const calls = d.calls.map((c) => `<tr><td><code>${esc(c.path)}</code></td><td>${Object.entries(c.params).map(([k, v]) => `<code>${esc(k)}=${esc(String(v).slice(0, 80))}</code>`).join(" ")}</td><td>${c.status}</td><td>${c.count}</td><td>${c.ms} ms</td></tr>`).join("");
+  $("results").innerHTML = `
+    <div class="card"><p class="summary">${esc(d.summary)}</p>
+      <div class="m">Matched in Qloo: ${d.resolved.map((r) => `<span class="tag">${esc(r.input)} → ${esc(r.as)}</span>`).join("")}${d.unresolved.length ? ` · not found: ${esc(d.unresolved.join(", "))}` : ""}</div></div>
+    <div class="card"><h2>Neighborhoods, ranked by taste</h2>${hoods}</div>
+    <div class="card"><h2>Your scouting weekend</h2>${weekend || '<span class="m">Not enough places found to plan a weekend.</span>'}</div>
+    <div class="card"><h2>How we know</h2>
+      <ol class="m" style="margin:0 0 10px 18px;padding:0">${d.trace.map((t) => `<li><b>${esc(t.step)}:</b> ${esc(t.detail)}</li>`).join("")}</ol>
+      <table><tr><th>Qloo call</th><th>Parameters (key never leaves the server)</th><th>Status</th><th>Results</th><th>Time</th></tr>${calls}</table>
+      <ul class="m" style="margin:10px 0 0 18px;padding:0">${d.limits.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></div>`;
+  layer.clearLayers();
+  const pts = [];
+  d.neighborhoods.forEach((h, i) => {
+    pts.push([h.lat, h.lon]);
+    L.circle([h.lat, h.lon], { radius: 500 + 900 * (h.affinity / max), color: "#0f766e", weight: 2, fillOpacity: 0.18 }).bindTooltip(`#${i + 1} ${h.name}`, { permanent: i < 3, direction: "top" }).addTo(layer);
+    h.evidence.forEach((e) => { if (e.lat && e.lon) { pts.push([e.lat, e.lon]); L.circleMarker([e.lat, e.lon], { radius: 5, color: "#e07a2f", fillOpacity: 0.9 }).bindTooltip(e.name).addTo(layer); } });
+  });
+  if (pts.length) map.fitBounds(pts, { padding: [30, 30], maxZoom: 13 });
+  document.querySelectorAll(".hood").forEach((el) => el.addEventListener("click", () => map.setView([+el.dataset.lat, +el.dataset.lon], 14)));
+}
+</script>
+</body>
+</html>
