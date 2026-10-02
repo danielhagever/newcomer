@@ -1,62 +1,49 @@
 import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { matchNeighborhoods, type Interest, type Kind, type MatchResult } from "./match";
-import { QlooError } from "./qloo";
+import { matchNeighborhoods, KINDS, type Interest, type Kind, type MatchResult } from "./match.ts";
+import { AppError, Budget, REQUEST_BUDGET, allow } from "./limits.ts";
+import { MAX_CITY, MAX_INTERESTS, MAX_NAME, cleanCity, cleanInterests, parseInterests } from "./input.ts";
 
 export interface Env {
   QLOO_API_KEY?: string;
   QLOO_BASE_URL?: string;
+  QLOO_HEATMAP_BOUNDARY?: string;
   CACHE: KVNamespace;
   AI: Ai;
   ASSETS: Fetcher;
 }
 
-const KINDS: Kind[] = ["artist", "movie", "tv_show", "book", "podcast", "video_game", "brand", "place", "tag"];
+// Per address, per hour. A search is 5 to 22 Qloo calls; parsing is one Workers AI call.
+const LIMITS = { parse: 30, match: 20, mcp: 20 };
+
 const json = (d: unknown, status = 200) =>
   new Response(JSON.stringify(d), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 
-// Turn "I love Phoebe Bridgers, The Bear, ramen and bouldering" into typed interests.
-async function parseInterests(env: Env, text: string): Promise<Interest[]> {
-  try {
-    const out: any = await env.AI.run(
-      "@cf/meta/llama-4-scout-17b-16e-instruct" as any,
-      {
-        messages: [
-          {
-            role: "system",
-            content: `Extract the person's interests as JSON: {"interests":[{"name":"...","kind":"..."}]}. kind is one of ${KINDS.join(", ")}. Use "tag" for cuisines, activities, styles and genres (e.g. ramen, bouldering, jazz, vintage clothing). Use the exact proper name for artists, films, shows, books, podcasts, games and brands. At most 8 interests. Output JSON only.`,
-          },
-          { role: "user", content: text.slice(0, 600) },
-        ],
-        max_tokens: 400,
-      } as any,
-    );
-    const rawVal = out?.response ?? out?.choices?.[0]?.message?.content ?? "";
-    // Some models return the JSON already parsed.
-    const raw = typeof rawVal === "string" ? rawVal : JSON.stringify(rawVal);
-    (globalThis as any).__lastParseRaw = raw.slice(0, 600);
-    const m = raw.match(/\{[\s\S]*\}/);
-    const parsed = m ? JSON.parse(m[0]) : null;
-    const list: Interest[] = (parsed?.interests ?? [])
-      .filter((i: any) => i?.name)
-      .map((i: any) => ({ name: String(i.name).slice(0, 60), kind: KINDS.includes(i.kind) ? i.kind : "tag" }));
-    if (list.length) return list.slice(0, 8);
-  } catch {}
-  // Fallback: split on commas and "and"; every item is tried as an entity name, then as a tag.
-  return text
-    .split(/,|\band\b|;/i)
-    .map((s) => s.replace(/^(i (love|like|enjoy)|into)\s+/i, "").trim())
-    .filter((s) => s.length > 1)
-    .slice(0, 8)
-    .map((name) => ({ name }));
-}
+const failure = (e: unknown) => {
+  if (e instanceof AppError) return { message: e.message, status: e.status >= 400 && e.status <= 599 ? e.status : 500 };
+  console.error("newcomer", String((e as Error)?.stack ?? e));
+  return { message: "Something went wrong on our side. Please try again.", status: 500 };
+};
 
-async function cachedMatch(env: Env, city: string, interests: Interest[]): Promise<MatchResult> {
-  const key = "match:" + (await sha(JSON.stringify([city.toLowerCase(), interests.map((i) => [i.name.toLowerCase(), i.kind])])));
-  const hit = await env.CACHE.get(key, "json");
-  if (hit) return hit as MatchResult;
-  const r = await matchNeighborhoods(env, city, interests);
-  await env.CACHE.put(key, JSON.stringify(r), { expirationTtl: 60 * 60 * 24 });
+async function cachedMatch(env: Env, budget: Budget, city: string, interests: Interest[]): Promise<MatchResult> {
+  const key = "match2:" + (await sha(JSON.stringify([city.toLowerCase(), interests.map((i) => [i.name.toLowerCase(), i.kind ?? "", i.id ?? ""])])));
+  if (budget.take()) {
+    try {
+      const hit = await env.CACHE.get(key, "json");
+      if (hit) return hit as MatchResult;
+    } catch {
+      // A cache miss is fine.
+    }
+  }
+  const r = await matchNeighborhoods(env, budget, city, interests);
+  // Results with a failed optional step are shown but not kept, so a hiccup isn't served all day.
+  if (!r.degraded && budget.take()) {
+    try {
+      await env.CACHE.put(key, JSON.stringify(r), { expirationTtl: 60 * 60 * 24 });
+    } catch {
+      // Daily KV write limit or a hiccup: the result is still returned.
+    }
+  }
   return r;
 }
 
@@ -68,40 +55,62 @@ async function sha(s: string): Promise<string> {
     .join("");
 }
 
-function summary(r: MatchResult): string {
+export function summary(r: MatchResult): string {
   const [a, b, c] = r.neighborhoods;
   if (!a) return `I couldn't find a neighborhood match in ${r.city}.`;
   const ev = a.evidence
     .slice(0, 2)
     .map((e) => e.name)
     .join(" and ");
-  return `In ${r.city}, ${a.name} fits your taste best${ev ? `: think ${ev}` : ""}. ${b ? `${b.name}${c ? ` and ${c.name}` : ""} come next.` : ""}`.trim();
+  const next = b ? ` ${b.name}${c ? ` and ${c.name}` : ""} come next.` : "";
+  return `In ${r.city}, ${a.name} fits your taste best${ev ? `: think ${ev}` : ""}.${next}`;
 }
 
-function buildServer(env: Env): McpServer {
-  const server = new McpServer({ name: "newcomer", version: "0.1.0", title: "Newcomer: neighborhoods that share your taste" });
+// What an agent should tell the person before relying on the answer.
+function caveats(r: MatchResult): string {
+  const closest = r.resolved.filter((x) => x.match === "closest");
+  const parts = closest.map(
+    (x) => `"${x.input}" was matched to ${x.as} (closest Qloo match, not an exact name)${x.alternatives.length ? `; alternatives: ${x.alternatives.map((a) => `${a.name} [id ${a.id}]`).join(", ")}` : ""}.`,
+  );
+  if (r.unresolved.length) parts.push(`Not found in Qloo: ${r.unresolved.join(", ")}.`);
+  return parts.join(" ");
+}
+
+function buildServer(env: Env, req: Request): McpServer {
+  const server = new McpServer({ name: "newcomer", version: "0.2.0", title: "Newcomer: neighborhoods that share your taste" });
   server.registerTool(
     "find_neighborhoods",
     {
       title: "Find neighborhoods that share your taste",
       description:
-        "For someone moving to a city: ranks the city's neighborhoods by how strongly the people there share the person's tastes (Qloo heatmap), names the places that show it, and drafts a two-day scouting weekend. Pass interests as names with a kind (artist, movie, tv_show, book, podcast, video_game, brand, place, or tag for cuisines, activities and genres).",
+        "For someone moving to a city: ranks the city's neighborhoods by how strongly the people there share the person's tastes (Qloo heatmap), names the places that show it, and drafts a two-day scouting weekend. Pass interests as names with a kind (artist, movie, tv_show, book, podcast, video_game, brand, place, or tag for cuisines, activities and genres). If a name was only a closest match, the result lists alternatives with their Qloo IDs: ask the person which one they meant, then call again with that id on the interest.",
       inputSchema: z.object({
-        city: z.string().describe("City the person is moving to, e.g. 'Austin, Texas'"),
+        city: z.string().min(2).max(MAX_CITY).describe("City the person is moving to, with its state or country, e.g. 'Austin, Texas'"),
         interests: z
-          .array(z.object({ name: z.string(), kind: z.enum(KINDS as [Kind, ...Kind[]]).optional() }))
+          .array(
+            z.object({
+              name: z.string().min(1).max(MAX_NAME),
+              kind: z.enum(KINDS as [Kind, ...Kind[]]).optional(),
+              id: z.string().max(80).optional().describe("A Qloo ID from an earlier result's alternatives, to pin the meaning"),
+            }),
+          )
           .min(1)
-          .max(8),
+          .max(MAX_INTERESTS),
       }),
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     async ({ city, interests }) => {
+      const budget = new Budget(REQUEST_BUDGET);
+      if (!(await allow(req, "mcp", LIMITS.mcp, budget)))
+        return { content: [{ type: "text", text: "Too many searches from this address in the last hour. Please try again later." }], isError: true };
       try {
-        const r = await cachedMatch(env, city, interests);
+        const clean = cleanInterests(interests);
+        const r = await cachedMatch(env, budget, cleanCity(city), clean);
         const s = summary(r);
-        return { content: [{ type: "text", text: s }], structuredContent: { spoken: s, ...r } };
+        const notes = caveats(r);
+        return { content: [{ type: "text", text: notes ? `${s}\n\n${notes}` : s }], structuredContent: { spoken: s, ...r } };
       } catch (e) {
-        return { content: [{ type: "text", text: (e as Error).message }], isError: true };
+        return { content: [{ type: "text", text: failure(e).message }], isError: true };
       }
     },
   );
@@ -111,24 +120,34 @@ function buildServer(env: Env): McpServer {
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return createMcpHandler(() => buildServer(env)).fetch(req);
+    if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return createMcpHandler(() => buildServer(env, req)).fetch(req);
+    if (url.pathname === "/favicon.ico") return Response.redirect(new URL("/favicon.svg", url).toString(), 301);
     if (url.pathname === "/api/status") return json({ qloo: !!env.QLOO_API_KEY });
     if (url.pathname === "/api/parse" && req.method === "POST") {
-      const body = (await req.json().catch(() => null)) as { text?: string } | null;
-      if (!body?.text) return json({ error: "text required" }, 400);
-      const interests = await parseInterests(env, body.text);
-      return json({ interests, ...(url.searchParams.get("debug") ? { raw: (globalThis as any).__lastParseRaw ?? null } : {}) });
+      const body = (await req.json().catch(() => null)) as { text?: unknown } | null;
+      const text = typeof body?.text === "string" ? body.text.trim() : "";
+      if (!text) return json({ error: "Tell Newcomer what you love first." }, 400);
+      if (!(await allow(req, "parse", LIMITS.parse))) return json({ error: "Too many requests from this address in the last hour. Please try again later." }, 429);
+      return json({ interests: await parseInterests(env.AI, text) });
     }
     if (url.pathname === "/api/match" && req.method === "POST") {
-      const body = (await req.json().catch(() => null)) as { city?: string; text?: string; interests?: Interest[] } | null;
-      if (!body?.city || (!body.text && !body.interests?.length)) return json({ error: "city and text (or interests) are required" }, 400);
+      const body = (await req.json().catch(() => null)) as { city?: unknown; text?: unknown; interests?: unknown } | null;
+      const city = cleanCity(body?.city);
+      const text = typeof body?.text === "string" ? body.text.trim() : "";
+      let interests = cleanInterests(body?.interests);
+      if (city.length < 2 || (!interests.length && !text)) return json({ error: "Please give a city and at least one thing you love." }, 400);
+      const budget = new Budget(REQUEST_BUDGET);
+      if (!(await allow(req, "match", LIMITS.match, budget))) return json({ error: "Too many searches from this address in the last hour. Please try again later." }, 429);
       try {
-        const interests = body.interests?.length ? body.interests.slice(0, 8) : await parseInterests(env, body.text!);
-        const r = await cachedMatch(env, body.city.slice(0, 80), interests);
+        if (!interests.length) {
+          budget.take(); // the Workers AI call may count as a subrequest too
+          interests = await parseInterests(env.AI, text);
+        }
+        const r = await cachedMatch(env, budget, city, interests);
         return json({ ...r, summary: summary(r), interests });
       } catch (e) {
-        const status = e instanceof QlooError ? e.status : 500;
-        return json({ error: (e as Error).message }, status);
+        const f = failure(e);
+        return json({ error: f.message }, f.status);
       }
     }
     return env.ASSETS.fetch(req);
