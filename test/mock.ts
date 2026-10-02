@@ -1,8 +1,9 @@
 // A stand-in for Qloo, Open-Meteo and Photon, plus a KV that counts its operations, so the tests can
-// check every rule (and the 50-subrequest limit) without a real key. Response shapes follow Qloo's
-// docs and the official harness: /search -> results[], /v2/tags -> results.tags[], heatmap ->
-// results.heatmap[] with location.{latitude,longitude,geohash} and query.{affinity,affinity_rank},
-// places -> results.entities[].
+// check every rule (and the 50-subrequest limit) without a real key. Shapes follow the live API as
+// measured on 2026-10-03: /search -> results[] (entity_id, name, types, disambiguation);
+// /v2/tags -> results.tags[] (id, name, type, parents[{type}]); heatmap -> results.heatmap[] of
+// geohash-7 cells with query.affinity = percentile, plus query.localities.filter[0]; places ->
+// results.entities[] with properties.neighborhood and typed tags (category, time_of_day_fit).
 
 export interface Call {
   host: string;
@@ -32,27 +33,48 @@ function defaults(c: Call): { status?: number; body: unknown } | undefined {
   if (c.host === "geocoding-api.open-meteo.com") return { body: { results: [AUSTIN] } };
   if (c.host === "photon.komoot.io") {
     const lat = Number(c.params.get("lat"));
-    return { body: { features: [{ properties: { district: `District ${Math.round(lat * 100) % 7}` } }] } };
+    return { body: { features: [{ properties: { district: `OSM District ${Math.round(lat * 100) % 7}` } }] } };
   }
   return undefined;
 }
 
-// Heatmap cells around a point, hottest first.
-export function cells(lat: number, lon: number, n: number, named = false) {
-  return Array.from({ length: n }, (_, i) => ({
-    ...(named ? { name: `Hood ${i}` } : {}),
-    location: { latitude: lat + (i % 9) * 0.011, longitude: lon + Math.floor(i / 9) * 0.011, geohash: `g${i}` },
-    query: { affinity: 0.95 - i * 0.01, affinity_rank: 1 - i / n, popularity: 0.5 },
-  }));
+const letter = (i: number) => "bcdefghjkmnpqrstuvwxyz"[i % 22];
+
+// A heatmap: `groups` squares of `per` cells each around a point, hottest square first; affinity is
+// the cell's percentile like the live API.
+export function heatmap(lat: number, lon: number, groups = 9, per = 8, locality = "Austin, Travis County, Texas, United States") {
+  const n = groups * per;
+  const cells = Array.from({ length: n }, (_, i) => {
+    const g = Math.floor(i / per);
+    return {
+      location: { latitude: lat + (g % 3) * 0.012 + (i % per) * 0.0005, longitude: lon + Math.floor(g / 3) * 0.012, geohash: `9v6s0${letter(g)}${letter(i)}` },
+      query: { affinity: 1 - i / (n - 1), affinity_rank: 1 - i / n, popularity: 0.5 },
+    };
+  });
+  return { success: true, results: { heatmap: cells }, query: { localities: { filter: [{ name: "Austin", disambiguation: locality, location: { lat, lon } }] } } };
 }
 
-export function places(prefix: string) {
+export function place(id: string, name: string, hood: string | null, lat: number, lon: number, categories: string[], times: string[]) {
+  return {
+    entity_id: id,
+    name,
+    location: { lat, lon, geohash: "9v6s0bb" },
+    properties: { address: `${id} Main St`, ...(hood ? { neighborhood: hood } : {}) },
+    tags: [...categories.map((n) => ({ name: n, type: "urn:tag:category:place" })), { name: "Mastercard", type: "urn:tag:payments:place" }, ...times.map((n) => ({ name: n, type: "urn:tag:time_of_day_fit:qloo" }))],
+  };
+}
+
+// Places around a point, named after the neighborhood the caller chooses.
+// hood: the Qloo neighborhood on each place, or null for places Qloo has no neighborhood for.
+export function places(prefix: string, hood: string | null = "Downtown", lat = 30.27, lon = -97.74) {
   return [
-    { entity_id: `${prefix}-1`, name: `${prefix} Coffee`, location: { lat: 30.27, lon: -97.74 }, properties: { address: "1 Main St" }, tags: [{ name: "Coffee Shop" }] },
-    { entity_id: `${prefix}-2`, name: `${prefix} Barbecue`, location: { lat: 30.27, lon: -97.73 }, properties: { address: "2 Main St" }, tags: [{ name: "Barbecue" }] },
-    { entity_id: `${prefix}-3`, name: `${prefix} Cocktail Bar`, location: { lat: 30.26, lon: -97.74 }, tags: [{ name: "Cocktail Bar" }] },
+    place(`${prefix}-1`, `${prefix} Coffee`, hood, lat, lon, ["Coffee shop"], ["Morning", "Midday"]),
+    place(`${prefix}-2`, `${prefix} Barbecue`, hood, lat + 0.001, lon, ["Barbecue restaurant"], ["Midday", "Afternoon"]),
+    place(`${prefix}-3`, `${prefix} Cocktail Bar`, hood, lat, lon + 0.001, ["Cocktail bar"], ["Evening", "Late night"]),
   ];
 }
+
+export const tag = (id: string, name: string, parents: string[]) => ({ id, name, type: id.split(":").slice(0, -1).join(":"), parents: parents.map((type) => ({ type })) });
 
 export function memoryKV(opts: { failPuts?: boolean } = {}) {
   const store = new Map<string, string>();

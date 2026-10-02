@@ -1,8 +1,14 @@
 // The Newcomer pipeline: from "here's what I love" to "here are the neighborhoods that already love
 // it too, here's the evidence, and here's a weekend to test it". Every step is recorded so the page
 // can show which Qloo calls produced which claim, and which parts are Newcomer's own rules.
+//
+// How the live API behaves (measured 2026-10-03, see submissions/newcomer-REVIEW.md R1-R12):
+// - the heatmap returns every ~150 m cell of the city with `affinity` = the cell's percentile;
+// - artists, shows, films and music/film genres move the heatmap; food and activity tags don't, but
+//   they work as filters on places;
+// - every place carries Qloo's own neighborhood name and time-of-day fit.
 
-import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type Signals } from "./qloo.ts";
+import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type Signals, type Tag } from "./qloo.ts";
 import { cityCenter, cellKey, km, namesFor } from "./geo.ts";
 import { AppError, type Budget } from "./limits.ts";
 
@@ -24,31 +30,36 @@ export interface Choice {
 
 export interface Resolved {
   input: string; // what the person wrote
-  as: string; // the Qloo name it matched
+  as: string; // the Qloo name it matched (with a year or similar when Qloo has several)
   id: string;
   type: string;
   signal: "entity" | "tag";
-  match: "exact" | "closest" | "chosen";
+  // exact: one Qloo name matched; ambiguous: several things share that exact name (the first is
+  // used); closest: no exact name, the top candidate is used; chosen: the person picked it.
+  match: "exact" | "ambiguous" | "closest" | "chosen";
   alternatives: Choice[];
   kind?: Kind;
+  use: ("map" | "places")[]; // where this signal acts: the taste map, the places, or both
+  placeTag?: string; // for a taste: the tag variant that applies to places (ramen as a cuisine)
 }
 
 export interface Neighborhood {
   name: string;
   lat: number;
   lon: number;
-  affinity: number; // mean Qloo affinity of the cells (or the Qloo neighborhood) behind this name
-  affinityRank?: number; // mean Qloo affinity_rank (0 to 1), when Qloo returns it
-  cells: number;
-  evidence: Entity[]; // places near the centre that Qloo ranks highly for the same signals
+  affinity: number; // map mode: mean percentile of its cells in the city (0 to 1); places mode: share of the matching places
+  cells: number; // map mode: map cells; places mode: matching places
+  evidence: Entity[]; // places here that Qloo ranks highly for the same tastes
+  matches: Entity[]; // places here that ARE one of your food or activity tastes
 }
 
 export interface MatchResult {
   city: string;
   center: { lat: number; lon: number };
+  qlooCity?: string; // the locality Qloo used, in Qloo's words
+  mode: "map" | "places"; // map: Qloo's taste heatmap; places: only food/activity tastes, ranked by matching places
   resolved: Resolved[];
   unresolved: string[];
-  boundary: "neighborhood" | "geohash";
   neighborhoods: Neighborhood[];
   weekend: { day: string; neighborhood: string; stops: { when: string; place: string; why: string }[] }[];
   limits: string[];
@@ -68,6 +79,7 @@ const ENTITY_TYPES: Record<string, string> = {
   brand: "urn:entity:brand",
   place: "urn:entity:place",
 };
+const MEDIA = ["urn:entity:artist", "urn:entity:movie", "urn:entity:tv_show", "urn:entity:book", "urn:entity:podcast"];
 
 const TAG_ID = /^urn:tag:[\w:.\-]+$/i;
 const ENTITY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -77,39 +89,99 @@ export const validQlooId = (id: string) => TAG_ID.test(id) || ENTITY_ID.test(id)
 // timeouts) stops the search with its real message instead of turning into "not found".
 const notFound = (e: unknown) => e instanceof AppError && (e.status === 400 || e.status === 404);
 
-// Pick the exact name match if there is one; otherwise the top result, marked "closest" so the
-// page (or the calling agent) can ask the person, with the other candidates as alternatives.
-function choose<T extends { id: string; name: string }>(input: string, list: T[], typeOf: (x: T) => string) {
+const label = (e: Entity) => (e.disambiguation && normalizeName(e.disambiguation) !== normalizeName(e.name) ? `${e.name} (${e.disambiguation})` : e.name);
+
+// Tags that change the taste map: music genres (jazz), and film/TV/book genres when the word has no
+// place meaning. Activities like bouldering also exist as film subgenres; those go to places only.
+const genre = (t: Tag) => /^urn:tag:(genre|subgenre):/.test(t.id);
+const musicTag = (t: Tag) => genre(t) && t.parents.includes("urn:entity:artist");
+const mediaTag = (t: Tag) => genre(t) && t.parents.some((p) => MEDIA.includes(p));
+const placeTag = (t: Tag) => t.parents.includes("urn:entity:place");
+// A tag picked by the person: cuisines, activities and the like filter places; genres go on the map.
+const placeFamily = (id: string) => /^urn:tag:(cuisine|activity_type|specialty_dish|setting|amenity|interests|category|genre:place)[:]/.test(id);
+
+async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Resolved | null> {
+  const list = await q.search(it.name, type, 5);
   if (!list.length) return null;
-  const exact = list.filter((x) => normalizeName(x.name) === normalizeName(input));
-  const pick = exact.length === 1 ? exact[0] : list[0];
+  const exact = list.filter((e) => normalizeName(e.name) === normalizeName(it.name));
+  const pick = exact[0] ?? list[0];
+  return {
+    input: it.name,
+    as: label(pick),
+    id: pick.id,
+    type: pick.types[0] ?? type ?? "entity",
+    signal: "entity",
+    match: exact.length === 1 ? "exact" : exact.length > 1 ? "ambiguous" : "closest",
+    alternatives: list
+      .filter((e) => e.id !== pick.id)
+      .slice(0, 4)
+      .map((e) => ({ id: e.id, name: label(e), type: e.types[0] ?? "entity" })),
+    kind: it.kind,
+    use: pick.types.includes("urn:entity:place") ? ["places"] : ["map"],
+  };
+}
+
+// A taste (ramen, bouldering, jazz) can have a map variant (a genre) and a place variant (a cuisine,
+// an activity): Qloo lists the same name in many families, each with the entity types it applies to.
+async function resolveTag(q: Qloo, it: Interest): Promise<Resolved | null> {
+  const list = await q.tags(it.name, 20);
+  if (!list.length) return null;
+  const exact = list.filter((t) => normalizeName(t.name) === normalizeName(it.name));
+  const pool = exact.length ? exact : list;
+  const forPlaces = pool.find(placeTag);
+  const forMap = pool.find(musicTag) ?? (forPlaces ? undefined : pool.find(mediaTag));
+  const pick = forMap ?? forPlaces ?? pool[0];
+  const names = new Set([normalizeName(pick.name)]);
   const alternatives = list
-    .filter((x) => x.id !== pick.id)
+    .filter((t) => {
+      const n = normalizeName(t.name);
+      if (names.has(n)) return false;
+      names.add(n);
+      return true;
+    })
     .slice(0, 4)
-    .map((x) => ({ id: x.id, name: x.name, type: typeOf(x) }));
-  return { pick, match: (exact.length === 1 ? "exact" : "closest") as "exact" | "closest", alternatives };
+    .map((t) => ({ id: t.id, name: t.name, type: t.type ?? "tag" }));
+  const use: Resolved["use"] = [];
+  if (forMap) use.push("map");
+  if (forPlaces) use.push("places");
+  return {
+    input: it.name,
+    as: pick.name,
+    id: pick.id,
+    type: pick.type ?? "tag",
+    signal: "tag",
+    match: exact.length ? "exact" : "closest",
+    alternatives,
+    kind: it.kind,
+    use: use.length ? use : ["map"],
+    ...(forPlaces ? { placeTag: forPlaces.id } : {}),
+  };
 }
 
 async function resolveOne(q: Qloo, it: Interest): Promise<Resolved | null> {
   if (it.id && validQlooId(it.id)) {
     const isTag = TAG_ID.test(it.id);
-    return { input: it.name, as: it.as ?? it.name, id: it.id, type: isTag ? "tag" : "entity", signal: isTag ? "tag" : "entity", match: "chosen", alternatives: [], kind: it.kind };
+    const onPlaces = isTag && placeFamily(it.id);
+    return {
+      input: it.name,
+      as: it.as ?? it.name,
+      id: it.id,
+      type: isTag ? "tag" : "entity",
+      signal: isTag ? "tag" : "entity",
+      match: "chosen",
+      alternatives: [],
+      kind: it.kind,
+      use: onPlaces ? ["places"] : ["map"],
+      ...(onPlaces ? { placeTag: it.id } : {}),
+    };
   }
   const entityType = it.kind && it.kind !== "tag" ? ENTITY_TYPES[it.kind] : undefined;
-  const asEntity = async (type?: string) => {
-    const c = choose(it.name, await q.search(it.name, type, 5), (e) => e.types[0] ?? type ?? "entity");
-    return c && ({ input: it.name, as: c.pick.name, id: c.pick.id, type: c.pick.types[0] ?? type ?? "entity", signal: "entity", match: c.match, alternatives: c.alternatives, kind: it.kind } as Resolved);
-  };
-  const asTag = async () => {
-    const c = choose(it.name, await q.tags(it.name, 20), (t) => t.type ?? "tag");
-    return c && ({ input: it.name, as: c.pick.name, id: c.pick.id, type: c.pick.type ?? "tag", signal: "tag", match: c.match, alternatives: c.alternatives, kind: it.kind } as Resolved);
-  };
   // At most two lookups per interest: its own kind first, then the other kind.
-  return entityType ? ((await asEntity(entityType)) ?? (await asTag())) : ((await asTag()) ?? (await asEntity()));
+  return entityType ? ((await resolveEntity(q, it, entityType)) ?? (await resolveTag(q, it))) : ((await resolveTag(q, it)) ?? (await resolveEntity(q, it)));
 }
 
 export async function matchNeighborhoods(
-  env: { QLOO_API_KEY?: string; QLOO_BASE_URL?: string; QLOO_HEATMAP_BOUNDARY?: string; CACHE: KVNamespace },
+  env: { QLOO_API_KEY?: string; QLOO_BASE_URL?: string; CACHE: KVNamespace },
   budget: Budget,
   city: string,
   interestsIn: Interest[],
@@ -124,12 +196,14 @@ export async function matchNeighborhoods(
 
   // 1. Each interest becomes a Qloo entity or tag. Same names are looked up once.
   const seen = new Set<string>();
-  const interests = interestsIn.filter((i) => {
-    const k = i.id ?? normalizeName(i.name);
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  }).slice(0, 8);
+  const interests = interestsIn
+    .filter((i) => {
+      const k = i.id ?? normalizeName(i.name);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .slice(0, 8);
   const outcomes = await Promise.all(
     interests.map((it) =>
       resolveOne(q, it).catch((e) => {
@@ -140,148 +214,163 @@ export async function matchNeighborhoods(
   );
   const resolved: Resolved[] = [];
   const unresolved: string[] = [];
+  const same: string[] = []; // two of your words for one Qloo thing
   outcomes.forEach((r, i) => {
-    if (!r) unresolved.push(interests[i].name);
-    else if (!resolved.some((x) => x.id === r.id)) resolved.push(r);
+    if (!r) return void unresolved.push(interests[i].name);
+    const first = resolved.find((x) => x.id === r.id);
+    if (first) same.push(`${r.input} is the same as ${first.input}`);
+    else resolved.push(r);
   });
-  const closest = resolved.filter((r) => r.match === "closest");
+  const unsure = resolved.filter((r) => r.match === "closest" || r.match === "ambiguous");
   trace.push({
     step: "Understand",
     detail:
-      `${resolved.length} of ${interests.length} interests matched in Qloo's taste graph` +
-      (closest.length ? `; closest match, not an exact name: ${closest.map((r) => `${r.input} → ${r.as}`).join(", ")}` : "") +
+      `${resolved.length + same.length} of ${interests.length} interests matched in Qloo's taste graph` +
+      (same.length ? ` (${same.join("; ")})` : "") +
+      (unsure.length ? `; worth checking: ${unsure.map((r) => `${r.input} → ${r.as} (${r.match === "closest" ? "closest name" : "several share this name"})`).join(", ")}` : "") +
       (unresolved.length ? `; not found: ${unresolved.join(", ")}` : ""),
   });
   if (!resolved.length)
     throw new AppError("None of those interests are in Qloo's graph. Try names of artists, shows, films, or kinds of food and activities.", 422);
-  const signals: Signals = {
-    entities: resolved.filter((r) => r.signal === "entity").map((r) => r.id),
-    tags: resolved.filter((r) => r.signal === "tag").map((r) => r.id),
-  };
 
-  // 2. Where in the city do people who share these tastes concentrate? Qloo is asked about the
-  // same city Newcomer located (not the raw text), and the answer is checked against it.
-  const wanted = env.QLOO_HEATMAP_BOUNDARY ?? "neighborhood";
-  let points: HeatPoint[] = [];
-  let boundaryOk = true;
-  try {
-    points = await q.heatmap(signals, { query: center.query }, 80, wanted);
-  } catch (e) {
-    if (!notFound(e)) throw e;
-    boundaryOk = false;
-    points = await q.heatmap(signals, { query: center.query }, 80); // the boundary value was refused: map cells
-  }
-  const farOff = (ps: HeatPoint[]) => {
-    const d = ps.slice(0, 10).map((p) => km(p, center)).sort((a, b) => a - b);
-    return d.length > 0 && d[Math.floor(d.length / 2)] > 60;
+  const mapSignals: Signals = {
+    entities: resolved.filter((r) => r.signal === "entity" && r.use.includes("map")).map((r) => r.id),
+    tags: resolved.filter((r) => r.signal === "tag" && r.use.includes("map")).map((r) => r.id),
   };
-  if (!points.length || farOff(points)) {
-    trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" ${points.length ? "was far from the located city" : "was empty"}; asked again for 25 km around the city centre` });
-    points = await q.heatmap(signals, { lat: center.lat, lon: center.lon, radiusM: 25000 }, 80, boundaryOk ? wanted : undefined);
-    if (farOff(points))
-      throw new AppError(`Qloo's map didn't line up with ${center.name}, so no neighborhoods are shown. Try the city with its state or country.`, 502);
-  }
-  const boundary: MatchResult["boundary"] = points.some((p) => p.name) ? "neighborhood" : "geohash";
-  trace.push({
-    step: "Heatmap",
-    detail: `${points.length} ${boundary === "neighborhood" ? "neighborhoods" : "map cells"} scored by Qloo for this taste profile`,
-  });
-  if (!points.length) throw new AppError(`Qloo has no heatmap for ${center.name} with these interests.`, 404);
+  // Places you named (a favorite restaurant) steer the place rankings too.
+  const placeSignals: Signals = { entities: [...mapSignals.entities, ...resolved.filter((r) => r.signal === "entity" && r.use.includes("places")).map((r) => r.id)], tags: mapSignals.tags };
+  const filterTags = [...new Set(resolved.map((r) => r.placeTag).filter((x): x is string => !!x))];
+  let mode: MatchResult["mode"] = mapSignals.entities.length + mapSignals.tags.length > 0 ? "map" : "places";
+  if (mode === "places" && !filterTags.length && !placeSignals.entities.length)
+    throw new AppError("Qloo couldn't use these interests to compare neighborhoods. Add an artist, a show or a film you love.", 422);
 
-  // 3. Name the cells and group them into neighborhoods.
-  const top = [...points].sort((a, b) => b.affinity - a.affinity).slice(0, 24);
-  let names = new Map<string, string>();
-  if (boundary === "geohash") {
-    // Keep room for 3 place calls and the final cache write.
-    const r = await namesFor(env.CACHE, budget, center.name, top.filter((p) => !p.name), 4);
-    names = r.names;
-    if (r.missing) degraded = true;
-  }
-  const nameOf = (p: HeatPoint): string | undefined => p.name ?? names.get(cellKey(p.lat, p.lon));
-  const groups = new Map<string, { lat: number; lon: number; aff: number[]; rank: number[] }>();
-  for (const p of top) {
-    // A cell without a name joins the nearest named cell within 1.5 km, or is left out.
-    let name = nameOf(p);
-    if (!name) {
-      const near = top.filter((o) => nameOf(o)).sort((a, b) => km(a, p) - km(b, p))[0];
-      if (near && km(near, p) <= 1.5) name = nameOf(near);
+  let hoods: Neighborhood[] = [];
+  let qlooCity: string | undefined;
+
+  let heat: Awaited<ReturnType<Qloo["heatmap"]>> = { points: [] };
+  if (mode === "map") {
+    // 2. Where in the city do people who share these tastes concentrate? Qloo is asked about the
+    // same city Newcomer located, and the locality it used is checked against it.
+    heat = await q.heatmap(mapSignals, { query: center.query });
+    const offBy = heat.locality ? km(heat.locality, center) : heat.points.length ? medianKm(heat.points, center) : 0;
+    if (!heat.points.length || offBy > 50) {
+      trace.push({
+        step: "Check",
+        detail: `Qloo's area for "${center.query}" ${heat.points.length ? `was ${Math.round(offBy)} km from the located city` : "was empty"}; asked again for 25 km around the city centre`,
+      });
+      heat = await q.heatmap(mapSignals, { lat: center.lat, lon: center.lon, radiusM: 25000 });
+      if (heat.points.length && medianKm(heat.points, center) > 50)
+        throw new AppError(`Qloo's map didn't line up with ${center.name}, so no neighborhoods are shown. Try the city with its state or country.`, 502);
     }
-    if (!name) continue;
-    const g = groups.get(name) ?? { lat: 0, lon: 0, aff: [], rank: [] };
-    g.lat += p.lat;
-    g.lon += p.lon;
-    g.aff.push(p.affinity);
-    if (p.affinityRank !== undefined) g.rank.push(p.affinityRank);
-    groups.set(name, g);
+    qlooCity = heat.locality?.name;
+    trace.push({ step: "Heatmap", detail: `Qloo scored ${heat.points.length} map cells${qlooCity ? ` in ${qlooCity}` : ""} for this taste profile` });
+    if (!heat.points.length && !filterTags.length) throw new AppError(`Qloo has no taste map for ${center.name} with these interests.`, 404);
+    if (!heat.points.length) mode = "places"; // no map for these signals, but the place tastes can still rank neighborhoods
   }
-  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
-  let hoods: Neighborhood[] = [...groups.entries()].map(([name, g]) => ({
-    name,
-    lat: g.lat / g.aff.length,
-    lon: g.lon / g.aff.length,
-    affinity: mean(g.aff),
-    ...(g.rank.length ? { affinityRank: mean(g.rank) } : {}),
-    cells: g.aff.length,
-    evidence: [],
-  }));
-  // Newcomer's rule: mean affinity, nudged up (at most 20%) for neighborhoods that hold several of
-  // the top cells, since one hot block is weaker evidence than several.
-  const score = (h: Neighborhood) => h.affinity * (1 + 0.05 * Math.min(h.cells, 4));
-  hoods.sort((a, b) => score(b) - score(a));
-  hoods = hoods.slice(0, 5);
-  if (!hoods.length) throw new AppError(`Qloo scored ${center.name}, but none of the top areas could be named. Please try again later.`, 502);
-  trace.push({
-    step: "Name",
-    detail:
-      boundary === "neighborhood"
-        ? `Qloo returned named neighborhoods; kept the top ${hoods.length}`
-        : `Grouped the top map cells into ${hoods.length} neighborhoods using OpenStreetMap names (Photon reverse geocoding)`,
-  });
+  if (mode === "map") {
+    // 3. Areas: squares of about 1 km (2.4 km where Qloo's cells are coarser), ranked by the mean
+    // percentile of all their cells (Newcomer's rule, labeled on the page), so one hot block doesn't
+    // outrank a whole hot area.
+    hoods = rankAreas(heat.points);
+    trace.push({ step: "Areas", detail: `Grouped the cells into areas of about ${areaKm(heat.points)} km and kept the ${hoods.length} with the highest mean affinity` });
 
-  // 4. Evidence: the places in each top neighborhood that Qloo ranks highest for the same tastes.
-  await Promise.all(
-    hoods.slice(0, 3).map(async (h) => {
+    // 4. Evidence: the places Qloo ranks highest for the same tastes around each area, three calls at
+    // a time (Qloo answers 429 to a burst of seven).
+    await inBatches(hoods, 3, async (h) => {
       try {
-        h.evidence = await q.placesNear(signals, h.lat, h.lon, 1200, 5);
+        h.evidence = await q.places(placeSignals, { lat: h.lat, lon: h.lon, radiusM: 1200 }, 8);
       } catch {
         degraded = true;
       }
-    }),
-  );
-  trace.push({ step: "Evidence", detail: `Asked Qloo for the best-matching places within 1.2 km of each of the top 3 neighborhoods` });
+    });
+  } else {
+    // Only food and activity tastes: Qloo's heatmap doesn't use them, so the areas are where the
+    // places that match them concentrate (one city-wide place search).
+    trace.push({
+      step: "Heatmap",
+      detail: heat.points.length || !(mapSignals.entities.length + mapSignals.tags.length)
+        ? "No artists, shows, films or genres to map; Qloo's taste map works from those, so the areas come from matching places instead"
+        : "Qloo's taste map was empty for these signals, so the areas come from the places that match your food and activity tastes instead",
+    });
+    const found = await q.places(placeSignals, { query: center.query }, 50, filterTags);
+    hoods = rankByPlaces(found, center);
+    trace.push({ step: "Areas", detail: `Qloo found ${found.length} places that match your food and activity tastes; grouped them by Qloo neighborhood` });
+  }
 
-  // 5. A weekend to test the move before signing a lease (Newcomer's plan, from Qloo's places).
-  const order = ["Morning", "Afternoon", "Evening"];
+  // Name each area from Qloo's own neighborhood field; OpenStreetMap (Photon) only where Qloo has none.
+  // A neighborhood named like the city itself ("Brooklyn" in Brooklyn) says nothing; skip it.
+  const cityWords = new Set([center.name.split(",")[0], qlooCity?.split(",")[0] ?? ""].map(nameKey).filter(Boolean));
+  for (const h of hoods)
+    if (!h.name) h.name = mostCommon([...h.evidence, ...h.matches].map((e) => e.neighborhood).filter((n): n is string => !!n && !cityWords.has(nameKey(n)))) ?? "";
+  for (const h of hoods) if (cityWords.has(nameKey(h.name))) h.name = "";
+  const unnamed = hoods.filter((h) => !h.name);
+  if (unnamed.length) {
+    const r = await namesFor(env.CACHE, budget, center.name, unnamed, 3);
+    for (const h of unnamed) h.name = r.names.get(cellKey(h.lat, h.lon)) ?? "";
+    if (r.missing) trace.push({ step: "Name", detail: `${r.missing} area${r.missing === 1 ? "" : "s"} had no neighborhood name in Qloo or OpenStreetMap and ${r.missing === 1 ? "was" : "were"} left out` });
+  }
+  hoods = mergeByName(hoods.filter((h) => h.name)).slice(0, 5);
+  if (!hoods.length) throw new AppError(`Qloo scored ${center.name}, but none of the top areas could be named. Please try again later.`, 502);
+  trace.push({ step: "Name", detail: `Named the areas from Qloo's place data (the neighborhood of the places found there)${unnamed.length ? `; OpenStreetMap for ${unnamed.length} without one` : ""}` });
+
+  // 5. Places that ARE your food and activity tastes, in the top neighborhoods (one city-wide call).
+  if (filterTags.length && mode === "map") {
+    try {
+      const found = await q.places(placeSignals, { query: center.query }, 50, filterTags);
+      let kept = 0;
+      for (const p of found) {
+        if (p.lat === undefined || p.lon === undefined) continue;
+        const at = { lat: p.lat, lon: p.lon };
+        const near = [...hoods].sort((a, b) => km(a, at) - km(b, at))[0];
+        if (near && km(near, at) <= 2) {
+          near.matches.push(p);
+          kept++;
+        }
+      }
+      trace.push({ step: "Your places", detail: `Qloo found ${found.length} places in the city that are one of your food or activity tastes; ${kept} are in the top neighborhoods` });
+    } catch {
+      degraded = true;
+    }
+  }
+  dedupeEvidence(hoods);
+  const dropped = hoods.reduce((n, h) => n + h.evidence.length + h.matches.length, 0);
+  for (const h of hoods) {
+    h.evidence = h.evidence.filter(visitable);
+    h.matches = h.matches.filter(visitable);
+  }
+  const left = hoods.reduce((n, h) => n + h.evidence.length + h.matches.length, 0);
+  if (dropped > left) trace.push({ step: "Filter", detail: `Left out ${dropped - left} places a newcomer can't visit (schools, offices, places of worship, studios and the like)` });
+
+  // 6. A weekend to test the move before signing a lease: one place per part of the day, from
+  // Qloo's time-of-day fit for each place.
   const weekend = hoods
     .slice(0, 2)
-    .map((h, i) => ({
-      day: i === 0 ? "Saturday" : "Sunday",
-      neighborhood: h.name,
-      stops: h.evidence
-        .slice(0, 4)
-        .map((e) => ({ when: slot(e), place: e.name, why: (e.tags ?? []).slice(0, 2).join(", ") }))
-        .sort((a, b) => order.indexOf(a.when) - order.indexOf(b.when)),
-    }))
+    .map((h, i) => ({ day: i === 0 ? "Saturday" : "Sunday", neighborhood: h.name, stops: planDay([...h.matches, ...h.evidence]) }))
     .filter((d) => d.stops.length);
-  trace.push({ step: "Plan", detail: weekend.length ? `Built a scouting weekend from the evidence places` : `Not enough evidence places for a weekend plan` });
+  trace.push({ step: "Plan", detail: weekend.length ? `Built a scouting weekend from those places, by Qloo's time-of-day fit` : `Not enough places for a weekend plan` });
 
   return {
     city: center.name,
     center: { lat: center.lat, lon: center.lon },
+    ...(qlooCity ? { qlooCity } : {}),
+    mode,
     resolved,
     unresolved,
-    boundary,
     neighborhoods: hoods,
     weekend,
     limits: [
       "Qloo affinities describe what groups of people in an area tend to like, not what any one person will do or feel.",
       "Taste fit is one input. Rent, commute, schools and safety are not part of this result.",
-      "Neighborhood names come from " + (boundary === "neighborhood" ? "Qloo" : "OpenStreetMap") + " and may not match local usage exactly.",
+      "Food and activity tastes choose the places shown; Qloo's taste map itself comes from artists, shows, films, books, podcasts and genres.",
+      "Neighborhood names are Qloo's (from its place data) and may not match local usage exactly.",
     ],
     ours: [
-      "Order of neighborhoods: Qloo's affinity, with a boost of up to 20% for a neighborhood that holds several of the top map cells (Newcomer's rule).",
-      "Weekend times of day are Newcomer's guess from each place's Qloo tags.",
-      ...(closest.length ? ["Where no Qloo name matched exactly, the closest match was used; you can pick another."] : []),
+      mode === "map"
+        ? "Areas are squares of about 1 km (2.4 km where Qloo's cells are coarser) ranked by the mean Qloo percentile of all their map cells, so one hot block can't outrank a whole hot area (Newcomer's rule)."
+        : "With only food and activity tastes, neighborhoods are ranked by how many matching places Qloo found there (Newcomer's rule).",
+      "Each weekend stop is the best-ranked place for that part of the day by Qloo's time-of-day tags; tattoo shops, salons and hotels are skipped unless they serve food or drink (Newcomer's rules).",
+      "Schools, offices, places of worship, recording studios and similar places are left out of the lists, since a newcomer can't visit them (Newcomer's rule).",
+      ...(unsure.length ? ["Where a name wasn't one exact match, the first Qloo candidate was used; you can pick another."] : []),
     ],
     degraded,
     trace,
@@ -289,10 +378,145 @@ export async function matchNeighborhoods(
   };
 }
 
-// Time of day for a place, from whole words in its tags and name.
-export function slot(e: { name: string; tags?: string[] }): string {
-  const t = (e.tags ?? []).join(" ").toLowerCase() + " " + e.name.toLowerCase();
-  if (/\b(coffee|coffee shop|cafe|café|bakery|breakfast|brunch)\b/.test(t)) return "Morning";
-  if (/\b(bar|bars|cocktail|cocktails|brewery|pub|live music|nightclub|club|music venue|wine bar|wine)\b/.test(t)) return "Evening";
-  return "Afternoon";
+function medianKm(ps: { lat: number; lon: number }[], c: { lat: number; lon: number }): number {
+  const d = ps
+    .slice(0, 15)
+    .map((p) => km(p, c))
+    .sort((a, b) => a - b);
+  return d.length ? d[Math.floor(d.length / 2)] : 0;
+}
+
+function emptyHood(lat: number, lon: number, affinity: number, cells: number): Neighborhood {
+  return { name: "", lat, lon, affinity, cells, evidence: [], matches: [] };
+}
+
+// Qloo's cells are geohash-7 (~150 m) in a city and geohash-6 (~1.2 x 0.6 km) over a big county.
+function cellLength(points: HeatPoint[]): number {
+  const n = new Map<number, number>();
+  for (const p of points.slice(0, 200)) if (p.geohash) n.set(p.geohash.length, (n.get(p.geohash.length) ?? 0) + 1);
+  return [...n.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 7;
+}
+const areaStep = (len: number) => (len >= 7 ? 0.01 : len === 6 ? 0.022 : 0); // degrees: about 1 km, about 2.4 km, or the cell itself
+export const areaKm = (points: HeatPoint[]) => (cellLength(points) >= 7 ? 1 : cellLength(points) === 6 ? 2.4 : 5);
+
+// Group cells on a grid sized to the cells, and rank squares by the mean percentile of all their
+// cells. Squares with few cells sit on the city's edge: they need about 40% of a full square.
+export function rankAreas(points: HeatPoint[], keep = 7): Neighborhood[] {
+  const len = cellLength(points);
+  const step = areaStep(len);
+  const minCells = len >= 7 ? 6 : len === 6 ? 3 : 1;
+  const groups = new Map<string, { lat: number; lon: number; sum: number; n: number }>();
+  for (const p of points) {
+    const key = step ? `${Math.floor(p.lat / step)},${Math.floor(p.lon / step)}` : (p.geohash ?? `${p.lat},${p.lon}`);
+    const g = groups.get(key) ?? { lat: 0, lon: 0, sum: 0, n: 0 };
+    g.lat += p.lat;
+    g.lon += p.lon;
+    g.sum += p.affinity;
+    g.n++;
+    groups.set(key, g);
+  }
+  const all = [...groups.values()].map((g) => ({ lat: g.lat / g.n, lon: g.lon / g.n, mean: g.sum / g.n, n: g.n }));
+  // Well-covered squares first; sparse ones only fill in after them.
+  const byMean = (a: { mean: number }, b: { mean: number }) => b.mean - a.mean;
+  const full = all.filter((g) => g.n >= minCells).sort(byMean);
+  const sparse = all.filter((g) => g.n < minCells).sort(byMean);
+  return [...full, ...sparse].slice(0, keep).map((g) => emptyHood(g.lat, g.lon, g.mean, g.n));
+}
+
+// Places-only mode: neighborhoods by how many matching places Qloo found there.
+function rankByPlaces(found: Entity[], center: { lat: number; lon: number }): Neighborhood[] {
+  const groups = new Map<string, Entity[]>();
+  for (const p of found) {
+    if (p.lat === undefined || p.lon === undefined || km({ lat: p.lat, lon: p.lon }, center) > 40) continue;
+    const key = p.neighborhood ?? `@${p.lat.toFixed(2)},${p.lon.toFixed(2)}`;
+    groups.set(key, [...(groups.get(key) ?? []), p]);
+  }
+  const total = Math.max(1, found.length);
+  return [...groups.entries()]
+    .map(([key, ps]) => {
+      const h = emptyHood(ps.reduce((a, p) => a + p.lat!, 0) / ps.length, ps.reduce((a, p) => a + p.lon!, 0) / ps.length, ps.length / total, ps.length);
+      h.name = key.startsWith("@") ? "" : key;
+      h.matches = ps;
+      return h;
+    })
+    .sort((a, b) => b.cells - a.cells || b.affinity - a.affinity)
+    .slice(0, 7);
+}
+
+const nameKey = (s: string) => normalizeName(s).replace(/^the\s+/, "");
+
+function mostCommon(xs: string[]): string | undefined {
+  const c = new Map<string, number>();
+  for (const x of xs) c.set(x, (c.get(x) ?? 0) + 1);
+  return [...c.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+
+// Two squares that Qloo puts in the same neighborhood become one entry (the better score, all places).
+function mergeByName(hoods: Neighborhood[]): Neighborhood[] {
+  const out: Neighborhood[] = [];
+  for (const h of hoods) {
+    const same = out.find((o) => nameKey(o.name) === nameKey(h.name));
+    if (!same) out.push(h);
+    else {
+      same.cells += h.cells;
+      same.evidence.push(...h.evidence);
+      same.matches.push(...h.matches);
+    }
+  }
+  return out;
+}
+
+// A place is listed once, under the neighborhood nearest to it, best-ranked first.
+function dedupeEvidence(hoods: Neighborhood[]) {
+  for (const field of ["matches", "evidence"] as const) {
+    const all = new Map<string, Entity>();
+    for (const h of hoods) for (const e of h[field]) if (!all.has(e.id)) all.set(e.id, e);
+    for (const h of hoods) h[field] = [];
+    for (const e of all.values()) {
+      const at = e.lat !== undefined && e.lon !== undefined ? { lat: e.lat, lon: e.lon } : null;
+      const home = at ? [...hoods].sort((a, b) => km(a, at) - km(b, at))[0] : hoods[0];
+      home[field].push(e);
+    }
+    for (const h of hoods) h[field] = h[field].sort((a, b) => (b.affinity ?? 0) - (a.affinity ?? 0)).slice(0, field === "matches" ? 4 : 5);
+  }
+  // A place that is one of your tastes isn't listed again among the taste places.
+  for (const h of hoods) h.evidence = h.evidence.filter((e) => !h.matches.some((m) => m.id === e.id));
+}
+
+const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office)\b/i;
+const visitable = (e: Entity) => !NOT_VISITABLE.test([...(e.tags ?? []), e.name].join(" | "));
+
+async function inBatches<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {
+  for (let i = 0; i < items.length; i += size) await Promise.all(items.slice(i, i + size).map(fn));
+}
+
+// A tattoo shop, a salon or a hotel can show the area's taste, but isn't a stop on a scouting
+// weekend unless it also serves food or drink, or is a venue.
+const NEVER_A_STOP = /\b(rv park|campground|motel|wedding venue)\b/i;
+const NOT_A_STOP = /\b(personal care|tattoo|piercing|salon|nail|barber|spa|lash|eyelash|waxing|lodging|hotel|resort)\b/i;
+const GO_TO = /\b(bar|pub|restaurant|cafe|café|coffee|bakery|brewery|winery|museum|gallery|park|beach|music venue|live music|concert|theater|theatre|cinema|book ?store|record store|market)\b/i;
+const weekendStop = (e: Entity) => {
+  const t = [...(e.tags ?? []), e.name].join(" | ");
+  if (NEVER_A_STOP.test(t)) return false;
+  return !NOT_A_STOP.test(t) || GO_TO.test((e.tags ?? []).join(" | "));
+};
+
+const SLOTS: [string, string[]][] = [
+  ["Morning", ["Early morning", "Morning"]],
+  ["Afternoon", ["Midday", "Afternoon", "All day"]],
+  ["Evening", ["Evening", "Late night"]],
+];
+
+// One place per part of the day, best-ranked first, from Qloo's time-of-day fit. A place without
+// time tags can fill the afternoon.
+export function planDay(places: Entity[]): { when: string; place: string; why: string }[] {
+  const used = new Set<string>();
+  const stops: { when: string; place: string; why: string }[] = [];
+  for (const [slotName, words] of SLOTS) {
+    const p = places.find((e) => weekendStop(e) && !used.has(e.id) && ((e.times ?? []).some((t) => words.includes(t)) || (slotName === "Afternoon" && !(e.times ?? []).length)));
+    if (!p) continue;
+    used.add(p.id);
+    stops.push({ when: slotName, place: p.name, why: (p.tags ?? []).slice(0, 2).join(", ") });
+  }
+  return stops;
 }

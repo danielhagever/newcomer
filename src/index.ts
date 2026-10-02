@@ -7,7 +7,6 @@ import { MAX_CITY, MAX_INTERESTS, MAX_NAME, cleanCity, cleanInterests, parseInte
 export interface Env {
   QLOO_API_KEY?: string;
   QLOO_BASE_URL?: string;
-  QLOO_HEATMAP_BOUNDARY?: string;
   CACHE: KVNamespace;
   AI: Ai;
   ASSETS: Fetcher;
@@ -25,8 +24,11 @@ const failure = (e: unknown) => {
   return { message: "Something went wrong on our side. Please try again.", status: 500 };
 };
 
+// Bump whenever the pipeline or the result format changes, so no one gets yesterday's logic.
+const CACHE_VERSION = 4;
+
 async function cachedMatch(env: Env, budget: Budget, city: string, interests: Interest[]): Promise<MatchResult> {
-  const key = "match2:" + (await sha(JSON.stringify([city.toLowerCase(), interests.map((i) => [i.name.toLowerCase(), i.kind ?? "", i.id ?? ""])])));
+  const key = `match${CACHE_VERSION}:` + (await sha(JSON.stringify([city.toLowerCase(), interests.map((i) => [i.name.toLowerCase(), i.kind ?? "", i.id ?? ""])])));
   if (budget.take()) {
     try {
       const hit = await env.CACHE.get(key, "json");
@@ -58,7 +60,7 @@ async function sha(s: string): Promise<string> {
 export function summary(r: MatchResult): string {
   const [a, b, c] = r.neighborhoods;
   if (!a) return `I couldn't find a neighborhood match in ${r.city}.`;
-  const ev = a.evidence
+  const ev = [...a.matches, ...a.evidence]
     .slice(0, 2)
     .map((e) => e.name)
     .join(" and ");
@@ -68,9 +70,10 @@ export function summary(r: MatchResult): string {
 
 // What an agent should tell the person before relying on the answer.
 function caveats(r: MatchResult): string {
-  const closest = r.resolved.filter((x) => x.match === "closest");
-  const parts = closest.map(
-    (x) => `"${x.input}" was matched to ${x.as} (closest Qloo match, not an exact name)${x.alternatives.length ? `; alternatives: ${x.alternatives.map((a) => `${a.name} [id ${a.id}]`).join(", ")}` : ""}.`,
+  const unsure = r.resolved.filter((x) => x.match === "closest" || x.match === "ambiguous");
+  const parts = unsure.map(
+    (x) =>
+      `"${x.input}" was matched to ${x.as} (${x.match === "closest" ? "closest Qloo match, not an exact name" : "several Qloo entries share this name; the first was used"})${x.alternatives.length ? `; alternatives: ${x.alternatives.map((a) => `${a.name} [id ${a.id}]`).join(", ")}` : ""}.`,
   );
   if (r.unresolved.length) parts.push(`Not found in Qloo: ${r.unresolved.join(", ")}.`);
   return parts.join(" ");
@@ -83,7 +86,7 @@ function buildServer(env: Env, req: Request): McpServer {
     {
       title: "Find neighborhoods that share your taste",
       description:
-        "For someone moving to a city: ranks the city's neighborhoods by how strongly the people there share the person's tastes (Qloo heatmap), names the places that show it, and drafts a two-day scouting weekend. Pass interests as names with a kind (artist, movie, tv_show, book, podcast, video_game, brand, place, or tag for cuisines, activities and genres). If a name was only a closest match, the result lists alternatives with their Qloo IDs: ask the person which one they meant, then call again with that id on the interest.",
+        "For someone moving to a city: ranks the city's neighborhoods by how strongly the people there share the person's tastes (Qloo heatmap), names the places that show it, and drafts a two-day scouting weekend. Pass interests as names with a kind (artist, movie, tv_show, book, podcast, video_game, brand, place, or tag for cuisines, activities and genres). If a name was only a closest match, or several Qloo entries share it, the result lists alternatives with their Qloo IDs: ask the person which one they meant, then call again with that id on the interest.",
       inputSchema: z.object({
         city: z.string().min(2).max(MAX_CITY).describe("City the person is moving to, with its state or country, e.g. 'Austin, Texas'"),
         interests: z

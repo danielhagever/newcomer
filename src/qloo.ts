@@ -16,29 +16,31 @@ export interface Entity {
   id: string;
   name: string;
   types: string[];
-  disambiguation?: string;
+  disambiguation?: string; // e.g. a film's year
   lat?: number;
   lon?: number;
   address?: string;
+  neighborhood?: string; // Qloo's own neighborhood name for a place
   priceLevel?: number;
   affinity?: number;
-  tags?: string[];
+  popularity?: number;
+  tags?: string[]; // a place's categories (Barbecue restaurant, Cocktail bar)
+  times?: string[]; // Qloo's time-of-day fit for a place (Morning, Midday, Evening...)
 }
 
 export interface Tag {
   id: string;
   name: string;
   type?: string;
+  parents: string[]; // entity types the tag applies to, e.g. urn:entity:place or urn:entity:artist
 }
 
 export interface HeatPoint {
   lat: number;
   lon: number;
   geohash?: string;
-  name?: string;
-  affinity: number;
-  affinityRank?: number; // Qloo's normalized rank, 0 to 1, when the API returns it
-  popularity?: number;
+  affinity: number; // the cell's percentile within the city, 0 to 1
+  affinityRank?: number;
 }
 
 export interface Provenance {
@@ -51,7 +53,8 @@ export interface Provenance {
 
 export class QlooError extends AppError {}
 
-const TIMEOUT_MS = 9000;
+// Measured: tag searches take 3-4 s and heatmaps up to 5.4 s under load.
+const TIMEOUT_MS = 12000;
 
 // Same comparison as the harness's resolver (NFKC, trimmed, lower case).
 export const normalizeName = (s: string) => s.normalize("NFKC").trim().toLocaleLowerCase("en-US");
@@ -65,7 +68,8 @@ export class Qloo {
     this.budget = budget;
   }
 
-  private async get(path: string, params: Record<string, string>): Promise<any> {
+  // One bounded retry: Qloo answers 429 to bursts (seen with 7 place calls at once).
+  private async get(path: string, params: Record<string, string>, retry = true): Promise<any> {
     if (!this.env.QLOO_API_KEY) throw new QlooError("The Qloo API key has not been configured yet.", 503);
     if (!this.budget.take()) throw new QlooError("This search needs more Qloo calls than one request allows. Try fewer interests.", 503);
     const base = this.env.QLOO_BASE_URL ?? "https://hackathon.api.qloo.com";
@@ -87,6 +91,10 @@ export class Qloo {
       ? body.results.length
       : (body?.results?.entities?.length ?? body?.results?.heatmap?.length ?? body?.results?.tags?.length ?? 0);
     this.calls.push({ path, params, status: res.status, ms: Date.now() - t, count });
+    if (res.status === 429 && retry && this.budget.left() > 1) {
+      await new Promise((r) => setTimeout(r, 800));
+      return this.get(path, params, false);
+    }
     if (res.status === 429) throw new QlooError("Qloo's rate limit was reached. Please try again in a minute.", 429);
     if (res.status === 401 || res.status === 403) throw new QlooError("Qloo refused this app's API key, so no search can run right now.", 503);
     if (!res.ok) {
@@ -106,21 +114,23 @@ export class Qloo {
     const body = await this.get("/v2/tags", { "filter.query": query, "feature.semantic_search": "true", take: String(take) });
     const list: any[] = body?.results?.tags ?? (Array.isArray(body?.results) ? body.results : []);
     return list
-      .map((t) => ({ id: String(t.id ?? t.tag_id ?? ""), name: String(t.name ?? ""), type: t.type ?? t.subtype }))
+      .map((t) => ({
+        id: String(t.id ?? t.tag_id ?? ""),
+        name: String(t.name ?? "").trim(),
+        type: t.type ?? t.subtype,
+        parents: (Array.isArray(t.parents) ? t.parents : []).map((p: any) => String(p?.type ?? p)),
+      }))
       .filter((t) => t.id && t.name);
   }
 
-  // where: a named place (Qloo resolves it to a locality) or a point with a radius in meters.
-  async heatmap(signals: Signals, where: Where, take = 80, boundary?: string): Promise<HeatPoint[]> {
-    const body = await this.get("/v2/insights", {
-      "filter.type": "urn:heatmap",
-      ...whereParams(where),
-      ...signalParams(signals),
-      take: String(take),
-      ...(boundary ? { "output.heatmap.boundary": boundary } : {}),
-    });
+  // The heatmap of a city: every geohash-7 cell (~150 m) Qloo has, sorted by affinity. Measured
+  // 2026-10-03: there is no neighborhood boundary (only urn:geohash or urn:entity:locality), `take`
+  // and `page` are ignored for heatmaps (and take > 50 is a 400), and `affinity` is the cell's
+  // percentile within the city (1 = best cell). The answer also names the locality Qloo used.
+  async heatmap(signals: Signals, where: Where): Promise<{ points: HeatPoint[]; locality?: Locality }> {
+    const body = await this.get("/v2/insights", { "filter.type": "urn:heatmap", ...whereParams(where), ...signalParams(signals) });
     const list: any[] = body?.results?.heatmap ?? [];
-    return list
+    const points = list
       .map((p) => {
         const loc = p.location ?? p.geo ?? p;
         const rank = num(p.query?.affinity_rank ?? p.affinity_rank);
@@ -128,24 +138,36 @@ export class Qloo {
           lat: num(loc.latitude ?? loc.lat),
           lon: num(loc.longitude ?? loc.lon ?? loc.lng),
           geohash: loc.geohash,
-          name: p.name ?? loc.name,
           affinity: num(p.query?.affinity ?? p.affinity),
           ...(Number.isFinite(rank) ? { affinityRank: rank } : {}),
-          popularity: num(p.query?.popularity ?? p.popularity),
         } as HeatPoint;
       })
       .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Number.isFinite(p.affinity));
+    const l = body?.query?.localities?.filter?.[0];
+    const lat = num(l?.location?.lat), lon = num(l?.location?.lon);
+    const locality = l && Number.isFinite(lat) && Number.isFinite(lon) ? { name: String(l.disambiguation ?? l.name ?? ""), lat, lon } : undefined;
+    return { points, ...(locality ? { locality } : {}) };
   }
 
-  async placesNear(signals: Signals, lat: number, lon: number, radiusM = 1200, take = 5): Promise<Entity[]> {
+  // Places that Qloo ranks for these tastes, near a point or in a city. `filterTags` keeps only
+  // places that carry at least one of the tags (ramen, bouldering, natural wine...): measured, food
+  // and activity tags work as filters on places but do nothing as heatmap signals.
+  async places(signals: Signals, where: Where, take = 8, filterTags: string[] = []): Promise<Entity[]> {
     const body = await this.get("/v2/insights", {
       "filter.type": "urn:entity:place",
-      ...whereParams({ lat, lon, radiusM }),
+      ...whereParams(where),
       ...signalParams(signals),
-      take: String(take),
+      ...(filterTags.length ? { "filter.tags": filterTags.join(","), "operator.filter.tags": "union" } : {}),
+      take: String(Math.min(50, take)),
     });
     return (body?.results?.entities ?? []).map(toEntity).filter((e: Entity) => e.name);
   }
+}
+
+export interface Locality {
+  name: string; // e.g. "Portland, Cumberland County, Maine, United States"
+  lat: number;
+  lon: number;
 }
 
 export interface Signals {
@@ -178,6 +200,7 @@ function num(v: unknown): number {
 
 function toEntity(e: any): Entity {
   const loc = e.location ?? e.properties?.geocode ?? {};
+  const tags: { name: string; type: string }[] = (Array.isArray(e.tags) ? e.tags : []).map((t: any) => ({ name: String(t?.name ?? t ?? "").trim(), type: String(t?.type ?? "") }));
   const lat = num(loc.lat ?? loc.latitude);
   const lon = num(loc.lon ?? loc.longitude ?? loc.lng);
   const affinity = num(e.query?.affinity);
@@ -191,6 +214,11 @@ function toEntity(e: any): Entity {
     address: e.properties?.address,
     priceLevel: e.properties?.price_level,
     affinity: Number.isFinite(affinity) ? affinity : undefined,
-    tags: (e.tags ?? []).slice(0, 6).map((t: any) => String(t.name ?? t)),
+    popularity: typeof e.popularity === "number" ? e.popularity : undefined,
+    neighborhood: typeof e.properties?.neighborhood === "string" && e.properties.neighborhood.trim() ? e.properties.neighborhood.trim() : undefined,
+    tags: [...new Set(tags.filter((t) => CATEGORY.has(t.type) && t.name !== "Place").map((t) => t.name))].slice(0, 4),
+    times: [...new Set(tags.filter((t) => t.type === "urn:tag:time_of_day_fit:qloo").map((t) => t.name))],
   };
 }
+
+const CATEGORY = new Set(["urn:tag:category:place", "urn:tag:genre:place", "urn:tag:cuisine:qloo"]);

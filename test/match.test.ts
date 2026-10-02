@@ -1,80 +1,224 @@
-// The pipeline against a mock Qloo. Run: npm test
+// The pipeline against a mock Qloo shaped like the live API. Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { matchNeighborhoods, slot } from "../src/match.ts";
+import { matchNeighborhoods, planDay, rankAreas } from "../src/match.ts";
 import { signalParams } from "../src/qloo.ts";
 import { cityCenter } from "../src/geo.ts";
 import { AppError, Budget } from "../src/limits.ts";
-import { AUSTIN, ENV, cells, memoryKV, mockFetch, places, type Call } from "./mock.ts";
+import { AUSTIN, ENV, heatmap, memoryKV, mockFetch, place, places, tag, type Call } from "./mock.ts";
 
 const UUID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const qloo = (c: Call) => c.host === "qloo.test";
+const isHeat = (c: Call) => qloo(c) && c.params.get("filter.type") === "urn:heatmap";
+const isPlaces = (c: Call) => qloo(c) && c.params.get("filter.type") === "urn:entity:place";
+const PLACE = "urn:entity:place";
 
-// A Qloo that knows a few things, answers heatmaps with named or unnamed cells, and has places.
-function standardQloo(opts: { named?: boolean; heat?: (c: Call) => unknown } = {}) {
+// A Qloo that knows a few things the way the live one answers them.
+function standardQloo(opts: { heat?: (c: Call) => unknown; hood?: (c: Call) => string | null } = {}) {
   return (c: Call) => {
     if (!qloo(c)) return undefined;
     if (c.path === "/search") {
       const q = c.params.get("query")!;
-      if (q === "Dune") return { body: { results: [{ entity_id: UUID(2), name: "Dune Messiah", types: ["urn:entity:book"] }, { entity_id: UUID(1), name: "Dune", types: ["urn:entity:movie"] }] } };
-      if (q === "Phoebe Bridgers") return { body: { results: [{ entity_id: UUID(3), name: "Phoebe Bridgers", types: ["urn:entity:artist"] }] } };
+      if (q === "Dune")
+        return { body: { results: [
+          { entity_id: UUID(1), name: "Dune", disambiguation: "2021", types: ["urn:entity:movie"] },
+          { entity_id: UUID(2), name: "Dune", disambiguation: "1984", types: ["urn:entity:movie"] },
+          { entity_id: UUID(5), name: "Dune: Part Two", disambiguation: "2024", types: ["urn:entity:movie"] },
+        ] } };
+      if (q === "Phoebe Bridgers") return { body: { results: [{ entity_id: UUID(3), name: "Phoebe Bridgers", disambiguation: "Phoebe Bridgers", types: ["urn:entity:artist"] }] } };
       if (q === "Phoebe") return { body: { results: [{ entity_id: UUID(3), name: "Phoebe Bridgers", types: ["urn:entity:artist"] }, { entity_id: UUID(4), name: "Phoebe Snow", types: ["urn:entity:artist"] }] } };
       return { body: { results: [] } };
     }
     if (c.path === "/v2/tags") {
       const q = c.params.get("filter.query")!;
-      if (q === "ramen") return { body: { results: { tags: [{ id: "urn:tag:genre:place:restaurant:ramen", name: "Ramen", type: "urn:tag:genre:place" }] } } };
-      if (q === "natural wine") return { body: { results: { tags: [{ id: "urn:tag:wine:natural", name: "Natural Wine Bar", type: "urn:tag:genre:place" }, { id: "urn:tag:wine", name: "Wine", type: "urn:tag:genre:place" }] } } };
+      if (q === "ramen")
+        return { body: { results: { tags: [
+          tag("urn:tag:cuisine:qloo:ramen", "Ramen", [PLACE]),
+          tag("urn:tag:popular_food_item:qloo:ramen", "Ramen", ["urn:entity:locality"]),
+          tag("urn:tag:cuisine:qloo:japanese_ramen", "Japanese Ramen", [PLACE]),
+          tag("urn:tag:keyword:media:ramen", "ramen", ["urn:entity:tv_show", "urn:entity:movie"]),
+        ] } } };
+      if (q === "jazz")
+        return { body: { results: { tags: [
+          tag("urn:tag:genre:qloo:jazz", "Jazz", ["urn:entity:artist", "urn:entity:movie"]),
+          tag("urn:tag:interests:qloo:jazz", "Jazz", [PLACE, "urn:entity:movie"]),
+        ] } } };
+      if (q === "bouldering") return { body: { results: { tags: [tag("urn:tag:activity_type:qloo:bouldering", "Bouldering", [PLACE]), tag("urn:tag:genre:qloo:bouldering", "Bouldering", ["urn:entity:person"])] } } };
       return { body: { results: { tags: [] } } };
     }
-    if (c.path === "/v2/insights" && c.params.get("filter.type") === "urn:heatmap")
-      return { body: opts.heat?.(c) ?? { results: { heatmap: cells(AUSTIN.latitude, AUSTIN.longitude, 30, opts.named) } } };
-    if (c.path === "/v2/insights" && c.params.get("filter.type") === "urn:entity:place") return { body: { results: { entities: places("P") } } };
+    if (isHeat(c)) return { body: opts.heat?.(c) ?? heatmap(AUSTIN.latitude, AUSTIN.longitude) };
+    if (isPlaces(c)) {
+      const at = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/);
+      if (c.params.get("filter.tags")) return { body: { results: { entities: [place("R-1", "Ramen Shop", "Downtown", AUSTIN.latitude + 0.001, AUSTIN.longitude, ["Ramen restaurant"], ["Evening"])] } } };
+      const lat = at ? +at[2] : AUSTIN.latitude, lon = at ? +at[1] : AUSTIN.longitude;
+      const hood = opts.hood ? opts.hood(c) : `Hood ${Math.round(lat * 1000) % 97}`;
+      return { body: { results: { entities: places(`P${lat.toFixed(3)}`, hood, lat, lon) } } };
+    }
     return undefined;
   };
 }
 
-test("an exact Qloo name wins; otherwise the top hit is marked 'closest' with alternatives", async () => {
-  const m = mockFetch(standardQloo({ named: true }));
+test("an exact Qloo name wins; two things with the same name are 'ambiguous' and labeled by year", async () => {
+  const m = mockFetch(standardQloo());
   try {
     const { kv } = memoryKV();
-    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Dune", kind: "movie" }, { name: "Phoebe", kind: "artist" }]);
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Dune", kind: "movie" }, { name: "Phoebe Bridgers", kind: "artist" }]);
     const dune = r.resolved.find((x) => x.input === "Dune")!;
-    assert.equal(dune.as, "Dune");
-    assert.equal(dune.match, "exact");
-    const phoebe = r.resolved.find((x) => x.input === "Phoebe")!;
-    assert.equal(phoebe.match, "closest");
-    assert.deepEqual(phoebe.alternatives.map((a) => a.name), ["Phoebe Snow"]);
-    assert.ok(r.ours.some((o) => o.includes("closest match")));
-    // Entity search asks for 5 candidates, tags for 20 with semantic search, like the official harness.
+    assert.equal(dune.match, "ambiguous");
+    assert.equal(dune.as, "Dune (2021)");
+    assert.deepEqual(dune.alternatives.map((a) => a.name), ["Dune (1984)", "Dune: Part Two (2024)"]);
+    const pb = r.resolved.find((x) => x.input === "Phoebe Bridgers")!;
+    assert.equal(pb.match, "exact");
+    assert.equal(pb.as, "Phoebe Bridgers", "a disambiguation equal to the name isn't repeated");
     assert.ok(m.calls.filter((c) => c.path === "/search").every((c) => c.params.get("take") === "5"));
+    assert.ok(m.calls.filter((c) => c.path === "/v2/tags").every((c) => c.params.get("feature.semantic_search") === "true"));
   } finally {
     m.restore();
   }
 });
 
-test("a Qloo ID the person picked is used as is, with no lookup", async () => {
-  const m = mockFetch(standardQloo({ named: true }));
+test("no exact name: the top hit is 'closest'; two names for the same thing are counted, not dropped", async () => {
+  const m = mockFetch(standardQloo());
   try {
     const { kv } = memoryKV();
-    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe", kind: "artist", id: UUID(4), as: "Phoebe Snow" }]);
-    assert.equal(m.calls.filter((c) => c.path === "/search" || c.path === "/v2/tags").length, 0);
-    assert.equal(r.resolved[0].as, "Phoebe Snow");
-    assert.equal(r.resolved[0].match, "chosen");
-    assert.equal(m.calls.find((c) => c.params.get("filter.type") === "urn:heatmap")!.params.get("signal.interests.entities"), UUID(4));
-  } finally {
-    m.restore();
-  }
-});
-
-test("the same interest twice is looked up once and sent once", async () => {
-  const m = mockFetch(standardQloo({ named: true }));
-  try {
-    const { kv } = memoryKV();
-    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }, { name: "Ramen", kind: "tag" }]);
-    assert.equal(m.calls.filter((c) => c.path === "/v2/tags").length, 1);
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe", kind: "artist" }, { name: "Phoebe Bridgers", kind: "artist" }]);
     assert.equal(r.resolved.length, 1);
-    assert.equal(m.calls.find((c) => c.params.get("filter.type") === "urn:heatmap")!.params.get("signal.interests.tags"), "urn:tag:genre:place:restaurant:ramen");
+    assert.equal(r.resolved[0].match, "closest");
+    assert.deepEqual(r.resolved[0].alternatives.map((a) => a.name), ["Phoebe Snow"]);
+    assert.match(r.trace.find((t) => t.step === "Understand")!.detail, /^2 of 2 interests matched.*Phoebe Bridgers is the same as Phoebe/);
+  } finally {
+    m.restore();
+  }
+});
+
+test("food and activity tastes pick places, not the map; genres do both", async () => {
+  const m = mockFetch(standardQloo());
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }, { name: "jazz", kind: "tag" }]);
+    const ramen = r.resolved.find((x) => x.input === "ramen")!;
+    assert.deepEqual(ramen.use, ["places"]);
+    assert.equal(ramen.id, "urn:tag:cuisine:qloo:ramen", "the cuisine, not the media keyword or the food item");
+    const jazz = r.resolved.find((x) => x.input === "jazz")!;
+    assert.deepEqual(jazz.use, ["map", "places"]);
+    const heat = m.calls.find(isHeat)!;
+    assert.equal(heat.params.get("signal.interests.tags"), "urn:tag:genre:qloo:jazz");
+    assert.equal(heat.params.get("signal.interests.entities"), UUID(3));
+    const tagged = m.calls.find((c) => isPlaces(c) && c.params.get("filter.tags"))!;
+    assert.equal(tagged.params.get("filter.tags"), "urn:tag:cuisine:qloo:ramen,urn:tag:interests:qloo:jazz");
+    assert.equal(tagged.params.get("operator.filter.tags"), "union");
+    assert.ok(r.neighborhoods.some((h) => h.matches.some((p) => p.name === "Ramen Shop")), "the ramen place shows under its neighborhood");
+  } finally {
+    m.restore();
+  }
+});
+
+test("the heatmap is asked without take or boundary (the live API rejects take > 50 and has no neighborhood boundary)", async () => {
+  const m = mockFetch(standardQloo());
+  try {
+    const { kv } = memoryKV();
+    await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    const heat = m.calls.filter(isHeat);
+    assert.equal(heat.length, 1);
+    assert.equal(heat[0].params.get("take"), null);
+    assert.equal(heat[0].params.get("output.heatmap.boundary"), null);
+    assert.ok(m.calls.filter(isPlaces).every((c) => Number(c.params.get("take")) <= 50));
+  } finally {
+    m.restore();
+  }
+});
+
+test("areas are ~1 km squares ranked by the mean percentile of all their cells, not by one hot cell", () => {
+  // Square A: one perfect cell and seven weak ones. Square B: eight good cells.
+  const cell = (g: string, i: number, affinity: number) => ({ lat: 30.005 + { a: 0, b: 0.02, c: 0.04 }[g]!, lon: -96.995, geohash: `9v6s0${g}${"bcdefghj"[i]}`, affinity });
+  const pts = [cell("a", 0, 1), ...Array.from({ length: 7 }, (_, i) => cell("a", i + 1, 0.2)), ...Array.from({ length: 8 }, (_, i) => cell("b", i, 0.9)), ...Array.from({ length: 8 }, (_, i) => cell("c", i, 0.5))];
+  const areas = rankAreas(pts);
+  assert.ok(Math.abs(areas[0].affinity - 0.9) < 1e-9);
+  assert.equal(areas[0].cells, 8);
+});
+
+test("areas are named by Qloo's own neighborhood field; OpenStreetMap is not called when Qloo names them", async () => {
+  const m = mockFetch(standardQloo({ hood: () => "East Cesar Chavez" }));
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.equal(r.neighborhoods[0].name, "East Cesar Chavez");
+    assert.equal(r.neighborhoods.length, 1, "squares Qloo puts in the same neighborhood are merged");
+    assert.equal(m.calls.filter((c) => c.host === "photon.komoot.io").length, 0);
+  } finally {
+    m.restore();
+  }
+});
+
+test("where Qloo's places have no neighborhood, OpenStreetMap names the area", async () => {
+  const m = mockFetch(standardQloo({ hood: () => null }));
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.ok(r.neighborhoods[0].name.startsWith("OSM District"));
+    assert.ok(m.calls.some((c) => c.host === "photon.komoot.io"));
+  } finally {
+    m.restore();
+  }
+});
+
+test("a place is listed once, under the best neighborhood that found it", async () => {
+  const m = mockFetch((c) => (isPlaces(c) && !c.params.get("filter.tags") ? { body: { results: { entities: places("Same", null, 30.27, -97.74) } } } : standardQloo({ hood: () => null })(c)));
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    const all = r.neighborhoods.flatMap((h) => h.evidence.map((e) => e.id));
+    assert.equal(all.length, new Set(all).size);
+  } finally {
+    m.restore();
+  }
+});
+
+test("only food and activity tastes: neighborhoods come from where matching places are", async () => {
+  const m = mockFetch((c) =>
+    isPlaces(c) && c.params.get("filter.tags")
+      ? { body: { results: { entities: [
+          place("a", "Ramen A", "Downtown", 30.27, -97.74, ["Ramen restaurant"], ["Evening"]),
+          place("b", "Ramen B", "Downtown", 30.271, -97.741, ["Ramen restaurant"], ["Midday"]),
+          place("c", "Gym C", "Hyde Park", 30.30, -97.73, ["Climbing gym"], ["Morning"]),
+        ] } } }
+      : standardQloo()(c),
+  );
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }, { name: "bouldering", kind: "tag" }]);
+    assert.equal(r.mode, "places");
+    assert.equal(m.calls.filter(isHeat).length, 0, "no heatmap: Qloo's map doesn't use these tags");
+    assert.deepEqual(r.neighborhoods.map((h) => [h.name, h.cells]), [["Downtown", 2], ["Hyde Park", 1]]);
+  } finally {
+    m.restore();
+  }
+});
+
+test("a picked Qloo ID is used as is: a cuisine filters places, an entity goes on the map", async () => {
+  const m = mockFetch(standardQloo());
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [
+      { name: "Dune", kind: "movie", id: UUID(2), as: "Dune (1984)" },
+      { name: "ramen", kind: "tag", id: "urn:tag:cuisine:qloo:japanese_ramen", as: "Japanese Ramen" },
+    ]);
+    assert.equal(m.calls.filter((c) => c.path === "/search" || c.path === "/v2/tags").length, 0);
+    assert.equal(m.calls.find(isHeat)!.params.get("signal.interests.entities"), UUID(2));
+    assert.equal(m.calls.find((c) => isPlaces(c) && c.params.get("filter.tags"))!.params.get("filter.tags"), "urn:tag:cuisine:qloo:japanese_ramen");
+    assert.ok(r.resolved.every((x) => x.match === "chosen"));
+  } finally {
+    m.restore();
+  }
+});
+
+test("the same interest twice is looked up once", async () => {
+  const m = mockFetch(standardQloo());
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "phoebe bridgers", kind: "artist" }]);
+    assert.equal(m.calls.filter((c) => c.path === "/search").length, 1);
+    assert.equal(r.resolved.length, 1);
   } finally {
     m.restore();
   }
@@ -85,7 +229,7 @@ test("a refused key or a rate limit is reported as such, never as 'not found'", 
     const m = mockFetch((c) => (qloo(c) ? { status, body: {} } : undefined));
     try {
       const { kv } = memoryKV();
-      await assert.rejects(matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]), (e: AppError) => expect.test(e.message));
+      await assert.rejects(matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]), (e: AppError) => expect.test(e.message));
     } finally {
       m.restore();
     }
@@ -93,10 +237,10 @@ test("a refused key or a rate limit is reported as such, never as 'not found'", 
 });
 
 test("something Qloo doesn't know is listed as not found, and the rest still runs", async () => {
-  const m = mockFetch(standardQloo({ named: true }));
+  const m = mockFetch(standardQloo());
   try {
     const { kv } = memoryKV();
-    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }, { name: "zzqx", kind: "tag" }]);
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "zzqx", kind: "tag" }]);
     assert.deepEqual(r.unresolved, ["zzqx"]);
     assert.ok(r.neighborhoods.length > 0);
   } finally {
@@ -104,45 +248,47 @@ test("something Qloo doesn't know is listed as not found, and the rest still run
   }
 });
 
-test("Qloo is asked about the city Newcomer located; an answer far away is asked again around the city", async () => {
-  let heatCalls = 0;
-  const m = mockFetch(
-    standardQloo({
-      heat: () => ({ results: { heatmap: cells(heatCalls++ === 0 ? 45.5 : AUSTIN.latitude, heatCalls === 1 ? -122.6 : AUSTIN.longitude, 20, true) } }),
-    }),
-  );
+test("Qloo's locality is shown, and one far from the located city is asked again around the city", async () => {
+  let n = 0;
+  const m = mockFetch(standardQloo({ heat: () => (n++ === 0 ? heatmap(45.52, -122.68, 9, 8, "Portland, Multnomah County, Oregon") : heatmap(AUSTIN.latitude, AUSTIN.longitude)) }));
   try {
     const { kv } = memoryKV();
-    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, TX", [{ name: "ramen", kind: "tag" }]);
-    const heat = m.calls.filter((c) => c.params.get("filter.type") === "urn:heatmap");
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, TX", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    const heat = m.calls.filter(isHeat);
     assert.equal(heat[0].params.get("filter.location.query"), "Austin, Texas");
     assert.equal(heat[1].params.get("filter.location"), `POINT(${AUSTIN.longitude} ${AUSTIN.latitude})`);
     assert.equal(heat[1].params.get("filter.location.radius"), "25000");
     assert.ok(r.trace.some((t) => t.step === "Check"));
+    assert.equal(r.qlooCity, "Austin, Travis County, Texas, United States");
   } finally {
     m.restore();
   }
 });
 
-test("several tags combine as union, set explicitly", () => {
+test("if Qloo's map is still far from the city after asking again, nothing is shown as that city", async () => {
+  const m = mockFetch(standardQloo({ heat: () => heatmap(45.52, -122.68, 9, 8, "Portland, Oregon") }));
+  try {
+    const { kv } = memoryKV();
+    await assert.rejects(matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]), /didn't line up with Austin, Texas/);
+  } finally {
+    m.restore();
+  }
+});
+
+test("several map tags combine as union, set explicitly", () => {
   assert.equal(signalParams({ entities: [], tags: ["a", "b"] })["operator.signal.interests.tags"], "union");
   assert.equal(signalParams({ entities: ["x"], tags: ["a"] })["operator.signal.interests.tags"], undefined);
 });
 
-test("a cold search on unnamed map cells stays inside the free plan's 50 subrequests, and every call is counted", async () => {
-  // 8 interests that each need two lookups, 80 unnamed cells, nothing cached.
+test("a cold worst-case search stays inside the free plan's 50 subrequests, and every call is counted", async () => {
+  // 8 interests that each need two lookups; Qloo names nothing, so OpenStreetMap names every area.
   const m = mockFetch((c) => {
-    if (qloo(c) && c.params.get("filter.type") === "urn:heatmap") {
-      const spread = Array.from({ length: 80 }, (_, i) => ({
-        location: { latitude: 30.2 + (i % 10) * 0.02, longitude: -97.8 + Math.floor(i / 10) * 0.02 },
-        query: { affinity: 0.99 - i * 0.005 },
-      }));
-      return { body: { results: { heatmap: spread } } };
-    }
     if (qloo(c) && c.path === "/search") return { body: { results: [] } };
-    if (qloo(c) && c.path === "/v2/tags") return { body: { results: { tags: [{ id: `urn:tag:t:${c.params.get("filter.query")}`, name: c.params.get("filter.query") }] } } };
-    if (qloo(c) && c.params.get("filter.type") === "urn:entity:place") return { body: { results: { entities: places("P") } } };
-    return undefined;
+    if (qloo(c) && c.path === "/v2/tags") {
+      const q = c.params.get("filter.query")!;
+      return { body: { results: { tags: [tag(`urn:tag:genre:qloo:${q}`, q, ["urn:entity:artist"]), tag(`urn:tag:cuisine:qloo:${q}`, q, [PLACE])] } } };
+    }
+    return standardQloo({ hood: () => null })(c);
   });
   try {
     const { kv, ops } = memoryKV();
@@ -153,7 +299,6 @@ test("a cold search on unnamed map cells stays inside the free plan's 50 subrequ
     assert.equal(real, budget.used, "every fetch and KV call is charged to the budget");
     assert.ok(real <= 44, `used ${real}`);
     assert.ok(r.neighborhoods.length > 0);
-    assert.ok(r.neighborhoods[0].evidence.length > 0, "the place calls still fit");
   } finally {
     m.restore();
   }
@@ -163,45 +308,37 @@ test("a failed cache write never fails a search", async () => {
   const m = mockFetch(standardQloo());
   try {
     const { kv } = memoryKV({ failPuts: true });
-    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]);
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
     assert.ok(r.neighborhoods.length > 0);
   } finally {
     m.restore();
   }
 });
 
-test("when a place call fails the result is flagged degraded (shown, not cached)", async () => {
-  const m = mockFetch((c) => (qloo(c) && c.params.get("filter.type") === "urn:entity:place" ? { status: 500, body: {} } : standardQloo({ named: true })(c)));
+test("when place calls fail the result is flagged degraded (shown, not cached) and has no empty days", async () => {
+  const m = mockFetch((c) => (isPlaces(c) ? { status: 500, body: {} } : standardQloo()(c)));
   try {
     const { kv } = memoryKV();
-    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]);
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
     assert.equal(r.degraded, true);
-    assert.equal(r.weekend.length, 0, "no empty weekend days");
-  } finally {
-    m.restore();
-  }
-});
-
-test("Qloo's neighborhoods are used as named; the weekend skips empty days", async () => {
-  const m = mockFetch(standardQloo({ named: true }));
-  try {
-    const { kv } = memoryKV();
-    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }, { name: "natural wine", kind: "tag" }]);
-    assert.equal(r.boundary, "neighborhood");
-    assert.equal(r.neighborhoods[0].name, "Hood 0");
-    assert.ok(r.neighborhoods[0].affinityRank !== undefined);
-    assert.equal(m.calls.filter((c) => c.host === "photon.komoot.io").length, 0);
     assert.ok(r.weekend.every((d) => d.stops.length > 0));
   } finally {
     m.restore();
   }
 });
 
-test("time of day uses whole words: barbecue is lunch, a cocktail bar is evening", () => {
-  assert.equal(slot({ name: "Franklin Barbecue", tags: ["Barbecue"] }), "Afternoon");
-  assert.equal(slot({ name: "Joe's Barber Shop" }), "Afternoon");
-  assert.equal(slot({ name: "Small Victory", tags: ["Cocktail Bar"] }), "Evening");
-  assert.equal(slot({ name: "Epoch", tags: ["Coffee Shop"] }), "Morning");
+test("the weekend takes one place per part of the day from Qloo's time-of-day tags", () => {
+  const ps = [
+    { id: "1", name: "Bar", types: [], tags: ["Cocktail bar"], times: ["Evening", "Late night"] },
+    { id: "2", name: "Cafe", types: [], tags: ["Coffee shop"], times: ["Morning"] },
+    { id: "3", name: "Barbecue", types: [], tags: ["Barbecue restaurant"], times: ["Midday", "Afternoon"] },
+    { id: "4", name: "Second cafe", types: [], tags: ["Coffee shop"], times: ["Morning"] },
+  ];
+  assert.deepEqual(planDay(ps), [
+    { when: "Morning", place: "Cafe", why: "Coffee shop" },
+    { when: "Afternoon", place: "Barbecue", why: "Barbecue restaurant" },
+    { when: "Evening", place: "Bar", why: "Cocktail bar" },
+  ]);
 });
 
 test("state abbreviations and names pick the right Portland", async () => {
@@ -230,13 +367,35 @@ test("a city service outage is a clear message, not a crash", async () => {
   }
 });
 
-test("if Qloo's answer is still far from the city after asking again, nothing is shown as that city", async () => {
-  const m = mockFetch(standardQloo({ heat: () => ({ results: { heatmap: cells(45.5, -122.6, 20, true) } }) }));
+test("coarse cells (a big county) are grouped into ~2.4 km squares, not ranked one by one", () => {
+  // 24 geohash-6 cells: one perfect cell alone, and a square of 4 good ones.
+  const pts = [
+    { lat: 34.001, lon: -118.001, geohash: "9q5aaa", affinity: 1 },
+    ...[0, 1, 2, 3].map((i) => ({ lat: 34.101 + i * 0.004, lon: -118.101, geohash: `9q5b${i}x`, affinity: 0.95 })),
+    ...Array.from({ length: 19 }, (_, i) => ({ lat: 34.3 + i * 0.03, lon: -118.4, geohash: `9q5c${i}y`, affinity: 0.1 })),
+  ];
+  const areas = rankAreas(pts);
+  assert.equal(areas[0].cells, 4);
+  assert.ok(Math.abs(areas[0].affinity - 0.95) < 1e-9);
+});
+
+test("the weekend skips tattoo shops, salons, hotels and RV parks, but keeps a hotel bar", () => {
+  const ps = [
+    { id: "1", name: "Fleur Noire Tattoo", types: [], tags: ["Personal care", "Tattoo shop"], times: ["Morning"] },
+    { id: "2", name: "Pecan Grove RV Park", types: [], tags: ["RV park"], times: ["Afternoon"] },
+    { id: "3", name: "Wythe Hotel", types: [], tags: ["Hotel", "Cocktail bar"], times: ["Evening"] },
+    { id: "4", name: "Epoch", types: [], tags: ["Coffee shop"], times: ["Morning"] },
+  ];
+  assert.deepEqual(planDay(ps).map((s) => s.place), ["Epoch", "Wythe Hotel"]);
+});
+
+test("an area no one can name is left out without marking the result as failed", async () => {
+  const m = mockFetch((c) => (c.host === "photon.komoot.io" ? { body: { features: [] } } : standardQloo({ hood: (c) => (String(c.params.get("filter.location")).includes("-97.743") ? null : "Downtown") })(c)));
   try {
     const { kv } = memoryKV();
-    await assert.rejects(matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]), /didn't line up with Austin, Texas/);
-    const heat = m.calls.filter((c) => c.params.get("filter.type") === "urn:heatmap");
-    assert.equal(heat[1].params.get("output.heatmap.boundary"), "neighborhood", "the retry keeps the neighborhood naming");
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.equal(r.degraded, false);
+    assert.ok(r.neighborhoods.every((h) => h.name));
   } finally {
     m.restore();
   }

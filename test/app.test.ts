@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import worker from "../src/index.ts";
 import { cleanInterests, fallbackInterests } from "../src/input.ts";
-import { ENV, memoryKV, mockFetch, places, cells, AUSTIN } from "./mock.ts";
+import { ENV, memoryKV, mockFetch, places, heatmap, tag, AUSTIN } from "./mock.ts";
 
 const page = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 
@@ -16,9 +16,9 @@ const post = (path: string, body: unknown) =>
 
 const qlooOk = (c: { host: string; path: string; params: URLSearchParams }) => {
   if (c.host !== "qloo.test") return undefined;
-  if (c.path === "/v2/tags") return { body: { results: { tags: [{ id: "urn:tag:ramen", name: "Ramen" }] } } };
-  if (c.path === "/search") return { body: { results: [] } };
-  if (c.params.get("filter.type") === "urn:heatmap") return { body: { results: { heatmap: cells(AUSTIN.latitude, AUSTIN.longitude, 12, true) } } };
+  if (c.path === "/v2/tags") return { body: { results: { tags: [tag("urn:tag:genre:qloo:jazz", "Jazz", ["urn:entity:artist"]), tag("urn:tag:cuisine:qloo:ramen", "Ramen", ["urn:entity:place"])] } } };
+  if (c.path === "/search") return { body: { results: [{ entity_id: "00000000-0000-4000-8000-000000000009", name: "Phoebe Bridgers", types: ["urn:entity:artist"] }] } };
+  if (c.params.get("filter.type") === "urn:heatmap") return { body: heatmap(AUSTIN.latitude, AUSTIN.longitude) };
   return { body: { results: { entities: places("P") } } };
 };
 
@@ -56,10 +56,10 @@ test("parse never returns the model's raw output (it used to, with ?debug=1, fro
 test("a search with text but no usable interests is parsed on the server", async () => {
   const m = mockFetch(qlooOk);
   try {
-    const r = await worker.fetch(post("/api/match", { city: "Austin, Texas", text: "ramen", interests: [] }), env());
+    const r = await worker.fetch(post("/api/match", { city: "Austin, Texas", text: "Phoebe Bridgers", interests: [] }), env(undefined, { response: '{"interests":[{"name":"Phoebe Bridgers","kind":"artist"}]}' }));
     assert.equal(r.status, 200);
     const d = await r.json();
-    assert.equal(d.resolved[0].as, "Ramen");
+    assert.equal(d.resolved[0].as, "Phoebe Bridgers");
   } finally {
     m.restore();
   }
@@ -69,17 +69,17 @@ test("a result is cached for a day; a degraded one is not", async () => {
   const m = mockFetch(qlooOk);
   try {
     const { kv, store } = memoryKV();
-    await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "ramen", kind: "tag" }] }), env(kv));
-    assert.equal([...store.keys()].filter((k) => k.startsWith("match2:")).length, 1);
+    await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "Phoebe Bridgers", kind: "artist" }] }), env(kv));
+    assert.equal([...store.keys()].filter((k) => k.startsWith("match4:")).length, 1);
   } finally {
     m.restore();
   }
   const broken = mockFetch((c) => (c.host === "qloo.test" && c.params.get("filter.type") === "urn:entity:place" ? { status: 500, body: {} } : qlooOk(c)));
   try {
     const { kv, store } = memoryKV();
-    const r = await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "ramen", kind: "tag" }] }), env(kv));
+    const r = await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "Phoebe Bridgers", kind: "artist" }] }), env(kv));
     assert.equal(r.status, 200);
-    assert.equal([...store.keys()].filter((k) => k.startsWith("match2:")).length, 0);
+    assert.equal([...store.keys()].filter((k) => k.startsWith("match4:")).length, 0);
   } finally {
     broken.restore();
   }
@@ -89,7 +89,7 @@ test("an unexpected error is a plain 500 message, not internals", async () => {
   // A heatmap that isn't a list makes the code throw a TypeError deep inside.
   const m = mockFetch((c) => (c.host === "qloo.test" && c.params.get("filter.type") === "urn:heatmap" ? { body: { results: { heatmap: { weird: true } } } } : qlooOk(c)));
   try {
-    const r = await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "ramen", kind: "tag" }] }), env());
+    const r = await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "Phoebe Bridgers", kind: "artist" }] }), env());
     assert.equal(r.status, 500);
     assert.equal((await r.json()).error, "Something went wrong on our side. Please try again.");
   } finally {
