@@ -495,7 +495,7 @@ async function inBatches<T>(items: T[], size: number, fn: (x: T) => Promise<void
 const NEVER_A_STOP = /\b(rv park|campground|motel|wedding venue)\b/i;
 const NOT_A_STOP = /\b(personal care|tattoo|piercing|salon|nail|barber|spa|lash|eyelash|waxing|lodging|hotel|resort)\b/i;
 const GO_TO = /\b(bar|pub|restaurant|cafe|café|coffee|bakery|brewery|winery|museum|gallery|park|beach|music venue|live music|concert|theater|theatre|cinema|book ?store|record store|market)\b/i;
-const weekendStop = (e: Entity) => {
+export const weekendStop = (e: Entity) => {
   const t = [...(e.tags ?? []), e.name].join(" | ");
   if (NEVER_A_STOP.test(t)) return false;
   return !NOT_A_STOP.test(t) || GO_TO.test((e.tags ?? []).join(" | "));

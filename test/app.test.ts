@@ -129,3 +129,10 @@ test("the page loads Leaflet with integrity hashes and has an icon", () => {
   for (const tag of page.match(/<(script|link)[^>]+leaflet[^>]+>/g) ?? []) assert.match(tag, /integrity="sha512-/, tag);
   assert.match(page, /<link rel="icon"/);
 });
+
+test("the one-line summary names places worth going to, not a tattoo shop", async () => {
+  const { summary } = await import("../src/index.ts");
+  const hood = (evidence: any[]) => ({ name: "Williamsburg", lat: 0, lon: 0, affinity: 0.9, cells: 10, matches: [], evidence });
+  const r: any = { city: "Brooklyn, New York", neighborhoods: [hood([{ id: "1", name: "Fleur Noire Tattoo", types: [], tags: ["Tattoo shop"] }, { id: "2", name: "Wythe Hotel", types: [], tags: ["Hotel", "Cocktail bar"] }, { id: "3", name: "Molasses Books", types: [], tags: ["Book store"] }])] };
+  assert.equal(summary(r), "In Brooklyn, New York, Williamsburg fits your taste best: think Wythe Hotel and Molasses Books.");
+});

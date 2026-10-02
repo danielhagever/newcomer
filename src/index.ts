@@ -1,6 +1,6 @@
 import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { matchNeighborhoods, KINDS, type Interest, type Kind, type MatchResult } from "./match.ts";
+import { matchNeighborhoods, weekendStop, KINDS, type Interest, type Kind, type MatchResult } from "./match.ts";
 import { AppError, Budget, REQUEST_BUDGET, allow } from "./limits.ts";
 import { MAX_CITY, MAX_INTERESTS, MAX_NAME, cleanCity, cleanInterests, parseInterests } from "./input.ts";
 
@@ -60,7 +60,9 @@ async function sha(s: string): Promise<string> {
 export function summary(r: MatchResult): string {
   const [a, b, c] = r.neighborhoods;
   if (!a) return `I couldn't find a neighborhood match in ${r.city}.`;
+  // Name places worth going to (the weekend's rule), your own kinds of places first.
   const ev = [...a.matches, ...a.evidence]
+    .filter(weekendStop)
     .slice(0, 2)
     .map((e) => e.name)
     .join(" and ");
