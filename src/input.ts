@@ -42,7 +42,7 @@ export function fallbackInterests(text: string): Interest[] {
     .map((s) => ({ name: s.slice(0, MAX_NAME) }));
 }
 
-const SYSTEM = `Extract the person's interests as JSON: {"interests":[{"name":"...","kind":"..."}]}. kind is one of ${KINDS.join(", ")}. Use "tag" for cuisines, activities, styles and genres (e.g. ramen, bouldering, jazz, vintage clothing). Use the exact proper name for artists, films, shows, books, podcasts, games and brands. At most ${MAX_INTERESTS} interests. Output JSON only.`;
+const SYSTEM = `Extract the person's interests as JSON: {"interests":[{"name":"...","kind":"..."}]}. kind is one of ${KINDS.join(", ")}. Use "tag" for cuisines, activities, styles and genres (e.g. ramen, bouldering, jazz, vintage clothing). Use the exact proper name for artists, films, shows, books, podcasts, games and brands. A capitalized name that is the title of a show, film, book, band or game is that title, not a tag (for example "Dark" is the TV series and "Heat" is the film); use "tag" only for common words like cuisines, activities and genres. At most ${MAX_INTERESTS} interests. Output JSON only.`;
 
 // "I love Phoebe Bridgers, The Bear, ramen and bouldering" -> typed interests (Workers AI).
 export async function parseInterests(ai: Ai, text: string): Promise<Interest[]> {
