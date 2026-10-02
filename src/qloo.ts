@@ -98,7 +98,7 @@ export class Qloo {
     if (res.status === 429) throw new QlooError("Qloo's rate limit was reached. Please try again in a minute.", 429);
     if (res.status === 401 || res.status === 403) throw new QlooError("Qloo refused this app's API key, so no search can run right now.", 503);
     if (!res.ok) {
-      const detail = body?.error?.message ?? body?.message;
+      const detail = body?.errors?.[0]?.message ?? body?.error?.message ?? body?.message;
       throw new QlooError(`Qloo answered ${res.status}${detail ? `: ${String(detail).slice(0, 160)}` : ""}`, res.status >= 500 ? 502 : res.status);
     }
     return body;
@@ -123,7 +123,8 @@ export class Qloo {
       .filter((t) => t.id && t.name);
   }
 
-  // The heatmap of a city: every geohash-7 cell (~150 m) Qloo has, sorted by affinity. Measured
+  // The heatmap of a city: every cell Qloo has (geohash-7, ~150 m, in a city; geohash-6 over a big
+  // county), sorted by affinity. Measured
   // 2026-10-03: there is no neighborhood boundary (only urn:geohash or urn:entity:locality), `take`
   // and `page` are ignored for heatmaps (and take > 50 is a 400), and `affinity` is the cell's
   // percentile within the city (1 = best cell). The answer also names the locality Qloo used.

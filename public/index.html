@@ -113,7 +113,7 @@ const KIND = { artist: "artist", movie: "film", tv_show: "TV show", book: "book"
 
 // Real progress: step 1 ends when the interests are understood; step 2 is the one server call.
 function progress(step) {
-  const steps = ["Understanding your taste", "Asking Qloo where people who share it concentrate, naming the neighborhoods and finding the places that prove it (usually 4 to 13 seconds)"];
+  const steps = ["Understanding your taste", "Asking Qloo where people who share it concentrate, naming the neighborhoods and finding the places that prove it (usually under 15 seconds)"];
   $("progress").hidden = false;
   $("steps").innerHTML = steps.map((s, j) => `<li class="${j < step ? "done" : j === step ? "now" : ""}">${s}</li>`).join("");
 }

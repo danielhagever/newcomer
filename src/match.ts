@@ -91,6 +91,30 @@ const notFound = (e: unknown) => e instanceof AppError && (e.status === 400 || e
 
 const label = (e: Entity) => (e.disambiguation && normalizeName(e.disambiguation) !== normalizeName(e.name) ? `${e.name} (${e.disambiguation})` : e.name);
 
+// Qloo's search (semantic search above all) always returns something, even for "zzqx". A candidate
+// that isn't the exact name is only accepted if it resembles what was typed: one contains the other,
+// or at least half the typed words appear in it, allowing a typo or two (swapped letters count once).
+const STOP = new Set(["the", "a", "an", "of", "and", "&"]);
+const words = (s: string) => normalizeName(s).replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w && !STOP.has(w));
+function typoDistance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  return d[a.length][b.length];
+}
+export function resembles(typed: string, name: string): boolean {
+  const a = words(typed), b = words(name);
+  if (!a.length || !b.length) return false;
+  const A = a.join(" "), B = b.join(" ");
+  if (A === B || B.includes(A) || A.includes(B)) return true;
+  const close = (w: string) => b.some((x) => x === w || typoDistance(w, x) <= (w.length > 5 ? 2 : w.length > 3 ? 1 : 0));
+  return a.filter(close).length / a.length >= 0.5;
+}
+
 // Tags that change the taste map: music genres (jazz), and film/TV/book genres when the word has no
 // place meaning. Activities like bouldering also exist as film subgenres; those go to places only.
 const genre = (t: Tag) => /^urn:tag:(genre|subgenre):/.test(t.id);
@@ -101,9 +125,10 @@ const placeTag = (t: Tag) => t.parents.includes("urn:entity:place");
 const placeFamily = (id: string) => /^urn:tag:(cuisine|activity_type|specialty_dish|setting|amenity|interests|category|genre:place)[:]/.test(id);
 
 async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Resolved | null> {
-  const list = await q.search(it.name, type, 5);
+  const found = await q.search(it.name, type, 5);
+  const exact = found.filter((e) => normalizeName(e.name) === normalizeName(it.name));
+  const list = found.filter((e) => exact.includes(e) || resembles(it.name, e.name));
   if (!list.length) return null;
-  const exact = list.filter((e) => normalizeName(e.name) === normalizeName(it.name));
   const pick = exact[0] ?? list[0];
   return {
     input: it.name,
@@ -124,13 +149,18 @@ async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Reso
 // A taste (ramen, bouldering, jazz) can have a map variant (a genre) and a place variant (a cuisine,
 // an activity): Qloo lists the same name in many families, each with the entity types it applies to.
 async function resolveTag(q: Qloo, it: Interest): Promise<Resolved | null> {
-  const list = await q.tags(it.name, 20);
+  const list = (await q.tags(it.name, 20)).filter((t) => resembles(it.name, t.name));
   if (!list.length) return null;
   const exact = list.filter((t) => normalizeName(t.name) === normalizeName(it.name));
   const pool = exact.length ? exact : list;
   const forPlaces = pool.find(placeTag);
-  const forMap = pool.find(musicTag) ?? (forPlaces ? undefined : pool.find(mediaTag));
-  const pick = forMap ?? forPlaces ?? pool[0];
+  // Yoga and skateboarding are also music genres; when the word means an activity or a food, its
+  // music namesake isn't what the person meant. Jazz and techno keep both (their place tag is a venue).
+  const activityOrFood = forPlaces && /^urn:tag:(activity_type|cuisine|specialty_dish|popular_food_item):/.test(forPlaces.id);
+  const forMap = activityOrFood ? undefined : (pool.find(musicTag) ?? (forPlaces ? undefined : pool.find(mediaTag)));
+  // A tag that is neither a genre nor about places can't place anyone in a neighborhood.
+  if (!forMap && !forPlaces) return null;
+  const pick = forMap ?? forPlaces!;
   const names = new Set([normalizeName(pick.name)]);
   const alternatives = list
     .filter((t) => {
@@ -153,7 +183,7 @@ async function resolveTag(q: Qloo, it: Interest): Promise<Resolved | null> {
     match: exact.length ? "exact" : "closest",
     alternatives,
     kind: it.kind,
-    use: use.length ? use : ["map"],
+    use,
     ...(forPlaces ? { placeTag: forPlaces.id } : {}),
   };
 }
@@ -332,14 +362,8 @@ export async function matchNeighborhoods(
       degraded = true;
     }
   }
-  dedupeEvidence(hoods);
-  const dropped = hoods.reduce((n, h) => n + h.evidence.length + h.matches.length, 0);
-  for (const h of hoods) {
-    h.evidence = h.evidence.filter(visitable);
-    h.matches = h.matches.filter(visitable);
-  }
-  const left = hoods.reduce((n, h) => n + h.evidence.length + h.matches.length, 0);
-  if (dropped > left) trace.push({ step: "Filter", detail: `Left out ${dropped - left} places a newcomer can't visit (schools, offices, places of worship, studios and the like)` });
+  const dropped = dedupeEvidence(hoods);
+  if (dropped) trace.push({ step: "Filter", detail: `Left out ${dropped} places a newcomer can't visit (schools, offices, places of worship, stations, studios and the like)` });
 
   // 6. A weekend to test the move before signing a lease: one place per part of the day, from
   // Qloo's time-of-day fit for each place.
@@ -369,7 +393,7 @@ export async function matchNeighborhoods(
         ? "Areas are squares of about 1 km (2.4 km where Qloo's cells are coarser) ranked by the mean Qloo percentile of all their map cells, so one hot block can't outrank a whole hot area (Newcomer's rule)."
         : "With only food and activity tastes, neighborhoods are ranked by how many matching places Qloo found there (Newcomer's rule).",
       "Each weekend stop is the best-ranked place for that part of the day by Qloo's time-of-day tags; tattoo shops, salons and hotels are skipped unless they serve food or drink (Newcomer's rules).",
-      "Schools, offices, places of worship, recording studios and similar places are left out of the lists, since a newcomer can't visit them (Newcomer's rule).",
+      "Schools, offices, places of worship, transit stations, recording studios and similar places are left out of the lists, since a newcomer can't visit them (Newcomer's rule).",
       ...(unsure.length ? ["Where a name wasn't one exact match, the first Qloo candidate was used; you can pick another."] : []),
     ],
     degraded,
@@ -466,13 +490,19 @@ function mergeByName(hoods: Neighborhood[]): Neighborhood[] {
   return out;
 }
 
-// A place is listed once, under the neighborhood nearest to it, best-ranked first.
-function dedupeEvidence(hoods: Neighborhood[]) {
+// A place is listed once, under the neighborhood nearest to it, best-ranked first; places a newcomer
+// can't visit are left out before the lists are cut to size. Returns how many were left out.
+function dedupeEvidence(hoods: Neighborhood[]): number {
+  let left = 0;
   for (const field of ["matches", "evidence"] as const) {
     const all = new Map<string, Entity>();
     for (const h of hoods) for (const e of h[field]) if (!all.has(e.id)) all.set(e.id, e);
     for (const h of hoods) h[field] = [];
     for (const e of all.values()) {
+      if (!visitable(e)) {
+        left++;
+        continue;
+      }
       const at = e.lat !== undefined && e.lon !== undefined ? { lat: e.lat, lon: e.lon } : null;
       const home = at ? [...hoods].sort((a, b) => km(a, at) - km(b, at))[0] : hoods[0];
       home[field].push(e);
@@ -481,10 +511,12 @@ function dedupeEvidence(hoods: Neighborhood[]) {
   }
   // A place that is one of your tastes isn't listed again among the taste places.
   for (const h of hoods) h.evidence = h.evidence.filter((e) => !h.matches.some((m) => m.id === e.id));
+  return left;
 }
 
-const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office)\b/i;
-const visitable = (e: Entity) => !NOT_VISITABLE.test([...(e.tags ?? []), e.name].join(" | "));
+// Judged on Qloo's categories only: a venue's name ("The Garage", "Temple Bar") says nothing.
+const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|municipal|department of|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office|business center|senior citizen|(subway|train|railway|metro|bus|transit) station)\b/i;
+const visitable = (e: Entity) => !NOT_VISITABLE.test((e.tags ?? []).join(" | "));
 
 async function inBatches<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {
   for (let i = 0; i < items.length; i += size) await Promise.all(items.slice(i, i + size).map(fn));
@@ -492,13 +524,13 @@ async function inBatches<T>(items: T[], size: number, fn: (x: T) => Promise<void
 
 // A tattoo shop, a salon or a hotel can show the area's taste, but isn't a stop on a scouting
 // weekend unless it also serves food or drink, or is a venue.
-const NEVER_A_STOP = /\b(rv park|campground|motel|wedding venue)\b/i;
+const NEVER_A_STOP = /\b(rv park|campground|motel|wedding venue|adult entertainment|strip club|sex shop)\b/i;
 const NOT_A_STOP = /\b(personal care|tattoo|piercing|salon|nail|barber|spa|lash|eyelash|waxing|lodging|hotel|resort)\b/i;
 const GO_TO = /\b(bar|pub|restaurant|cafe|café|coffee|bakery|brewery|winery|museum|gallery|park|beach|music venue|live music|concert|theater|theatre|cinema|book ?store|record store|market)\b/i;
 export const weekendStop = (e: Entity) => {
-  const t = [...(e.tags ?? []), e.name].join(" | ");
+  const t = (e.tags ?? []).join(" | ");
   if (NEVER_A_STOP.test(t)) return false;
-  return !NOT_A_STOP.test(t) || GO_TO.test((e.tags ?? []).join(" | "));
+  return !NOT_A_STOP.test(t) || GO_TO.test(t);
 };
 
 const SLOTS: [string, string[]][] = [
@@ -510,12 +542,15 @@ const SLOTS: [string, string[]][] = [
 // One place per part of the day, best-ranked first, from Qloo's time-of-day fit. A place without
 // time tags can fill the afternoon.
 export function planDay(places: Entity[]): { when: string; place: string; why: string }[] {
-  const used = new Set<string>();
+  const used = new Set<string>(); // ids and names: two branches of one chain aren't two stops
   const stops: { when: string; place: string; why: string }[] = [];
-  for (const [slotName, words] of SLOTS) {
-    const p = places.find((e) => weekendStop(e) && !used.has(e.id) && ((e.times ?? []).some((t) => words.includes(t)) || (slotName === "Afternoon" && !(e.times ?? []).length)));
+  for (const [slotName, fits] of SLOTS) {
+    const p = places.find(
+      (e) => weekendStop(e) && !used.has(e.id) && !used.has(normalizeName(e.name)) && ((e.times ?? []).some((t) => fits.includes(t)) || (slotName === "Afternoon" && !(e.times ?? []).length)),
+    );
     if (!p) continue;
     used.add(p.id);
+    used.add(normalizeName(p.name));
     stops.push({ when: slotName, place: p.name, why: (p.tags ?? []).slice(0, 2).join(", ") });
   }
   return stops;

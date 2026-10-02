@@ -70,7 +70,7 @@ test("a result is cached for a day; a degraded one is not", async () => {
   try {
     const { kv, store } = memoryKV();
     await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "Phoebe Bridgers", kind: "artist" }] }), env(kv));
-    assert.equal([...store.keys()].filter((k) => k.startsWith("match4:")).length, 1);
+    assert.equal([...store.keys()].filter((k) => k.startsWith("match5:")).length, 1);
   } finally {
     m.restore();
   }
@@ -79,7 +79,7 @@ test("a result is cached for a day; a degraded one is not", async () => {
     const { kv, store } = memoryKV();
     const r = await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "Phoebe Bridgers", kind: "artist" }] }), env(kv));
     assert.equal(r.status, 200);
-    assert.equal([...store.keys()].filter((k) => k.startsWith("match4:")).length, 0);
+    assert.equal([...store.keys()].filter((k) => k.startsWith("match5:")).length, 0);
   } finally {
     broken.restore();
   }
@@ -135,4 +135,14 @@ test("the one-line summary names places worth going to, not a tattoo shop", asyn
   const hood = (evidence: any[]) => ({ name: "Williamsburg", lat: 0, lon: 0, affinity: 0.9, cells: 10, matches: [], evidence });
   const r: any = { city: "Brooklyn, New York", neighborhoods: [hood([{ id: "1", name: "Fleur Noire Tattoo", types: [], tags: ["Tattoo shop"] }, { id: "2", name: "Wythe Hotel", types: [], tags: ["Hotel", "Cocktail bar"] }, { id: "3", name: "Molasses Books", types: [], tags: ["Book store"] }])] };
   assert.equal(summary(r), "In Brooklyn, New York, Williamsburg fits your taste best: think Wythe Hotel and Molasses Books.");
+});
+
+test("Qloo's own 400 message reaches the person", async () => {
+  const m = mockFetch((c) => (c.host === "qloo.test" && c.params.get("filter.type") === "urn:heatmap" ? { status: 400, body: { errors: [{ message: "take must be an integer value between 1 and 50", path: "take" }] } } : qlooOk(c)));
+  try {
+    const r = await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "Phoebe Bridgers", kind: "artist" }] }), env());
+    assert.match((await r.json()).error, /take must be an integer value between 1 and 50/);
+  } finally {
+    m.restore();
+  }
 });

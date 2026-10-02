@@ -37,7 +37,7 @@ Without Qloo, an agent can only repeat what the internet says about neighborhood
 | Taste places per neighborhood | `GET /v2/insights?filter.type=urn:entity:place&filter.location=POINT(lon lat)&filter.location.radius=1200&signal.interests.entities=<ids>&take=8` | Places people with your taste rate highly; their `properties.neighborhood` names the area, their time-of-day tags plan the weekend |
 | Your kinds of places | `GET /v2/insights?filter.type=urn:entity:place&filter.location.query=<city>&filter.tags=<cuisine/activity tags>&operator.filter.tags=union&signal.interests.entities=<ids>&take=50` | Ramen shops, bouldering gyms and natural wine bars, ranked by your taste |
 
-In six test searches a cold search made 4 to 16 Qloo calls (at most 26 by design) and took 4 to 13 seconds; repeats are cached for a day. Place calls run three at a time with one bounded retry, because Qloo answers a burst with 429. Every external call is counted against Cloudflare's free-plan limit of 50 per request, so an optional step stops early rather than failing the search.
+In 17 live test searches (Austin, Los Angeles, Brooklyn, Chicago, Portland ME, London, Berlin, Tel Aviv and more) a cold search made 3 to 17 Qloo calls, including 0 to 3 retries after a 429, and took 2.6 to 15 seconds; repeats are cached for a day. A search can never make more than 48 external calls in total (the budget below). Place calls run three at a time with one bounded retry, because Qloo answers a burst with 429. Every external call is counted against Cloudflare's free-plan limit of 50 per request, so an optional step stops early rather than failing the search.
 
 ### What the live API taught us (measured 2026-10-03)
 
@@ -84,6 +84,7 @@ A real run on 2026-10-03 (no personal data; the key is not shown anywhere).
 - Taste fit is one input. Rent, commute, schools and safety are deliberately out of scope, so the app is not used to judge housing eligibility or anything similar.
 - No personal data is sent to Qloo: only public cultural signals (names of artists, shows, cuisines) and a city.
 - Food and activity tastes pick places but don't shape Qloo's heatmap; with only those, neighborhoods are ranked by matching places, which is thinner evidence.
+- A word that isn't an exact Qloo name is only used if it resembles what was typed (allowing a typo or two); anything else is reported as not found, because Qloo's semantic search returns something for any text.
 - Neighborhood names are Qloo's (from its place data), with OpenStreetMap where Qloo has none; they may differ from local usage, and Qloo sometimes uses a district name ("Near North Side") next to the neighborhoods inside it.
 - The area squares, their ranking, the left-out place types and the weekend picks are Newcomer's rules on top of Qloo's numbers; the page labels them.
 - Results are cached for a day per identical query to respect the event quota. A result where an optional step failed is shown but not cached.
@@ -96,7 +97,7 @@ You need Node.js 22 or newer and a free Cloudflare account (Workers, KV and Work
 ```bash
 git clone https://github.com/danielhagever/newcomer && cd newcomer
 npm install
-npm test                                          # 36 tests against a mock Qloo shaped like the live API, no key needed
+npm test                                          # 44 tests against a mock Qloo shaped like the live API, no key needed
 npx wrangler login
 npx wrangler kv namespace create newcomer-cache   # put the id in wrangler.jsonc
 npx wrangler secret put QLOO_API_KEY             # your hackathon key, server-side only

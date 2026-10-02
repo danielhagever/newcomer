@@ -1,7 +1,7 @@
 // The pipeline against a mock Qloo shaped like the live API. Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { matchNeighborhoods, planDay, rankAreas } from "../src/match.ts";
+import { matchNeighborhoods, planDay, rankAreas, resembles } from "../src/match.ts";
 import { signalParams } from "../src/qloo.ts";
 import { cityCenter } from "../src/geo.ts";
 import { AppError, Budget } from "../src/limits.ts";
@@ -399,4 +399,107 @@ test("an area no one can name is left out without marking the result as failed",
   } finally {
     m.restore();
   }
+});
+
+test("a near-miss counts only if it resembles what was typed", () => {
+  assert.ok(resembles("Berghain", "Kantine am Berghain"));
+  assert.ok(resembles("Phobe Bridgers", "Phoebe Bridgers"));
+  assert.ok(resembles("The Baer", "The Bear"), "swapped letters count as one typo");
+  assert.ok(resembles("natural wine", "Natural Wines"));
+  assert.ok(!resembles("zzqx", "Zydeco"));
+  assert.ok(!resembles("Dune", "Everything, Everything"));
+});
+
+test("nonsense is 'not found' (Qloo's semantic search returns something for anything)", async () => {
+  const m = mockFetch((c) => {
+    if (qloo(c) && c.path === "/v2/tags") return { body: { results: { tags: [tag("urn:tag:genre:qloo:zydeco", "Zydeco", ["urn:entity:artist"]), tag("urn:tag:cuisine:qloo:quiche", "Quiche", [PLACE])] } } };
+    if (qloo(c) && c.path === "/search") return { body: { results: [{ entity_id: UUID(7), name: "Queen", types: ["urn:entity:artist"] }] } };
+    return standardQloo()(c);
+  });
+  try {
+    const { kv } = memoryKV();
+    await assert.rejects(matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "zzqx", kind: "tag" }, { name: "qqwwzz" }]), (e: AppError) => e.status === 422);
+    assert.equal(m.calls.filter(isHeat).length, 0);
+  } finally {
+    m.restore();
+  }
+});
+
+test("alternatives are only things that resemble the word (no 'Everything, Everything' for Dune)", async () => {
+  const m = mockFetch((c) =>
+    qloo(c) && c.path === "/search"
+      ? { body: { results: [{ entity_id: UUID(1), name: "Dune", disambiguation: "2021", types: ["urn:entity:movie"] }, { entity_id: UUID(9), name: "Everything, Everything", disambiguation: "2017", types: ["urn:entity:movie"] }, { entity_id: UUID(5), name: "Dune: Part Two", disambiguation: "2024", types: ["urn:entity:movie"] }] } }
+      : standardQloo()(c),
+  );
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Dune", kind: "movie" }]);
+    assert.deepEqual(r.resolved[0].alternatives.map((a) => a.name), ["Dune: Part Two (2024)"]);
+  } finally {
+    m.restore();
+  }
+});
+
+test("an activity's music namesake stays off the map (yoga), a music genre goes on it (jazz)", async () => {
+  const m = mockFetch((c) =>
+    qloo(c) && c.path === "/v2/tags" && c.params.get("filter.query") === "yoga"
+      ? { body: { results: { tags: [tag("urn:tag:subgenre:qloo:yoga", "Yoga", ["urn:entity:artist"]), tag("urn:tag:activity_type:qloo:yoga", "Yoga", [PLACE])] } } }
+      : standardQloo()(c),
+  );
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "yoga", kind: "tag" }, { name: "jazz", kind: "tag" }]);
+    assert.deepEqual(r.resolved.find((x) => x.input === "yoga")!.use, ["places"]);
+    assert.deepEqual(r.resolved.find((x) => x.input === "jazz")!.use, ["map", "places"]);
+    assert.equal(m.calls.find(isHeat)!.params.get("signal.interests.tags"), "urn:tag:genre:qloo:jazz");
+  } finally {
+    m.restore();
+  }
+});
+
+test("a tag that is neither a genre nor about places is not used", async () => {
+  const m = mockFetch((c) =>
+    qloo(c) && c.path === "/v2/tags" && c.params.get("filter.query") === "ramen"
+      ? { body: { results: { tags: [tag("urn:tag:popular_food_item:qloo:ramen", "Ramen", ["urn:entity:locality"])] } } }
+      : standardQloo()(c),
+  );
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
+    assert.deepEqual(r.unresolved, ["ramen"]);
+  } finally {
+    m.restore();
+  }
+});
+
+test("can't-visit places are judged by Qloo's categories, not names, and filtered before the lists are cut", async () => {
+  const many = [
+    place("s1", "Some High School", "Downtown", 30.27, -97.74, ["High school"], ["Morning"]),
+    place("s2", "Piccadilly Circus", "Downtown", 30.27, -97.74, ["Subway station"], ["Morning"]),
+    place("s3", "St. Somebody", "Downtown", 30.27, -97.74, ["Church"], ["Morning"]),
+    place("v1", "The Garage", "Downtown", 30.27, -97.74, ["Cocktail bar"], ["Evening"]),
+    place("v2", "Temple Bar", "Downtown", 30.27, -97.74, ["Pub"], ["Evening"]),
+    place("v3", "Bank & Bourbon", "Downtown", 30.27, -97.74, ["Restaurant"], ["Evening"]),
+    place("v4", "Cafe One", "Downtown", 30.27, -97.74, ["Cafe"], ["Morning"]),
+    place("v5", "Gallery Two", "Downtown", 30.27, -97.74, ["Art gallery"], ["Afternoon"]),
+  ];
+  const m = mockFetch((c) => (isPlaces(c) && !c.params.get("filter.tags") ? { body: { results: { entities: many } } } : standardQloo()(c)));
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    const listed = r.neighborhoods.flatMap((h) => h.evidence.map((e) => e.name));
+    assert.deepEqual(listed.sort(), ["Bank & Bourbon", "Cafe One", "Gallery Two", "Temple Bar", "The Garage"]);
+    assert.ok(r.trace.some((t) => t.step === "Filter" && /Left out 3 places/.test(t.detail)));
+  } finally {
+    m.restore();
+  }
+});
+
+test("two branches of one chain aren't two stops on the same day", () => {
+  const ps = [
+    { id: "1", name: "Cocoro", types: [], tags: ["Ramen"], times: ["Afternoon"] },
+    { id: "2", name: "Cocoro", types: [], tags: ["Bar"], times: ["Evening"] },
+    { id: "3", name: "Night Bar", types: [], tags: ["Bar"], times: ["Evening"] },
+  ];
+  assert.deepEqual(planDay(ps).map((s) => s.place), ["Cocoro", "Night Bar"]);
 });
