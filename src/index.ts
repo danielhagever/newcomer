@@ -90,7 +90,7 @@ function buildServer(env: Env, req: Request): McpServer {
     {
       title: "Find neighborhoods that share your taste",
       description:
-        "For someone moving to a city: ranks the city's neighborhoods by how strongly the people there share the person's tastes (Qloo heatmap), names the places that show it, and drafts a two-day scouting weekend. Pass interests as names with a kind (artist, movie, tv_show, book, podcast, video_game, brand, place, or tag for cuisines, activities and genres). If a name was only a closest match, or several Qloo entries share it, the result lists alternatives with their Qloo IDs: ask the person which one they meant, then call again with that id on the interest.",
+        "For someone moving to a city: ranks the city's neighborhoods by how strongly the people there share the person's tastes (Qloo heatmap), names the places that show it, and drafts a two-day scouting weekend. Pass each interest by its English name as Qloo knows it, accents kept ('Fauda', not 'פאודה'; 'Björk'), with a kind (artist, movie, tv_show, book, podcast, video_game, brand, place, or tag for cuisines, activities and genres). If a name was only a closest match, or several Qloo entries share it, the result lists alternatives with their Qloo IDs: ask the person which one they meant, then call again with that id on the interest.",
       inputSchema: z.object({
         city: z.string().min(2).max(MAX_CITY).describe("City the person is moving to, with its state or country, e.g. 'Austin, Texas'"),
         interests: z

@@ -186,3 +186,13 @@ test("an English name that only drops accents is not used: Qloo keeps the accent
   assert.deepEqual(c[1], { name: "Sigur Rós" });
   assert.deepEqual(c[2], { name: "senderismo", query: "hiking", kind: "tag" });
 });
+
+test("the MCP tool tells agents to pass English names with accents kept", async () => {
+  const list = new Request("https://newcomer.test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+  });
+  const text = await (await worker.fetch(list, env())).text();
+  assert.match(text, /English name as Qloo knows it/);
+});

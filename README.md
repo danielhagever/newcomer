@@ -60,6 +60,8 @@ curl -s https://newcomer.meshulam791.workers.dev/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find_neighborhoods","arguments":{"city":"Austin, Texas","interests":[{"name":"Phoebe Bridgers","kind":"artist"},{"name":"ramen","kind":"tag"}]}}}'
 ```
 
+Qloo's names are English: an agent passes the English name ("Fauda", not "פאודה"), with accents kept ("Björk"). The web page does this itself: the person can type in any language and sees what was typed, while Qloo is searched with the English name.
+
 When a name was only a closest match, the tool's text answer says so and lists the alternatives with their Qloo IDs; the tool description tells the agent to ask the person which one they meant and call again with that `id` on the interest. The full result (neighborhoods, evidence, weekend, every Qloo call) is in `structuredContent`.
 
 ## Request to result, redacted
@@ -98,7 +100,7 @@ You need Node.js 22 or newer and a free Cloudflare account (Workers, KV and Work
 ```bash
 git clone https://github.com/danielhagever/newcomer && cd newcomer
 npm install
-npm test                                          # 55 tests against a mock Qloo shaped like the live API, no key needed
+npm test                                          # 56 tests against a mock Qloo shaped like the live API, no key needed
 npx wrangler login
 npx wrangler kv namespace create newcomer-cache   # put the id in wrangler.jsonc
 npx wrangler secret put QLOO_API_KEY             # your hackathon key, server-side only
