@@ -668,3 +668,63 @@ test("a square with only a few cells (the city's edge) never outranks well-cover
     m.restore();
   }
 });
+
+test("a picked item keeps its English name in the answer", async () => {
+  const m = mockFetch(standardQloo());
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "פאודה", query: "Fauda", kind: "tv_show", id: UUID(3), as: "Fauda (2015)" }]);
+    assert.equal(r.resolved[0].match, "chosen");
+    assert.equal(r.resolved[0].query, "Fauda");
+  } finally {
+    m.restore();
+  }
+});
+
+test("a taste whose exact name can't act falls back to a similar tag that can; 'Not it?' offers only tags that act, and a picked one acts the same way", async () => {
+  const wine = (c: Call) =>
+    qloo(c) && c.path === "/v2/tags" && c.params.get("filter.query") === "natural wine bars"
+      ? { body: { results: { tags: [
+          tag("urn:tag:keyword:media:natural_wine_bars", "Natural Wine Bars", ["urn:entity:movie"]),
+          tag("urn:tag:lifestyle:qloo:natural_wine_bars", "Natural Wine Bars", ["urn:entity:brand"]),
+          tag("urn:tag:cuisine:qloo:natural_wine", "Natural Wine", [PLACE]),
+          tag("urn:tag:good_for:qloo:natural_wine_bar", "Natural Wine Bar", [PLACE]),
+          tag("urn:tag:theme:qloo:wine", "Wine Bars", ["urn:entity:book"]),
+        ] } } }
+      : standardQloo()(c);
+  const m = mockFetch(wine);
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "natural wine bars", kind: "tag" }]);
+    const w = r.resolved.find((x) => x.input === "natural wine bars")!;
+    assert.ok(w, `resolved: ${JSON.stringify(r.unresolved)}`);
+    assert.equal(w.match, "closest");
+    assert.deepEqual(w.use, ["places"]);
+    assert.deepEqual(w.alternatives.map((a) => a.id), ["urn:tag:good_for:qloo:natural_wine_bar"]);
+  } finally {
+    m.restore();
+  }
+  const again = mockFetch(standardQloo());
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [
+      { name: "Phoebe Bridgers", kind: "artist" },
+      { name: "natural wine bars", kind: "tag", id: "urn:tag:good_for:qloo:natural_wine_bar", as: "Natural Wine Bar" },
+    ]);
+    const w = r.resolved.find((x) => x.input === "natural wine bars")!;
+    assert.deepEqual(w.use, ["places"]);
+    assert.equal(w.placeTag, "urn:tag:good_for:qloo:natural_wine_bar");
+  } finally {
+    again.restore();
+  }
+});
+
+test("squares Qloo names alike merge, and the entry states its best square's numbers, not a sum", async () => {
+  const lat0 = 30.2621; // squares inside the 0.01-degree grid: 8 cells each
+  const m = mockFetch(standardQloo({ heat: () => heatmap(lat0, AUSTIN.longitude, 9, 8), hood: () => "East Cesar Chavez" }));
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.equal(r.neighborhoods.length, 1);
+    assert.equal(r.neighborhoods[0].cells, 8);
+    assert.ok(Math.abs(r.neighborhoods[0].affinity - (1 - 3.5 / 71)) < 1e-9, String(r.neighborhoods[0].affinity));
+  } finally {
+    m.restore();
+  }
+});

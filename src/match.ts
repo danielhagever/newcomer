@@ -125,8 +125,13 @@ const genre = (t: Tag) => /^urn:tag:(genre|subgenre):/.test(t.id);
 const musicTag = (t: Tag) => genre(t) && t.parents.includes("urn:entity:artist");
 const mediaTag = (t: Tag) => genre(t) && t.parents.some((p) => MEDIA.includes(p));
 const placeTag = (t: Tag) => t.parents.includes("urn:entity:place");
-// A tag picked by the person: cuisines, activities and the like filter places; genres go on the map.
-const placeFamily = (id: string) => /^urn:tag:(cuisine|activity_type|specialty_dish|setting|amenity|interests|category|genre:place)[:]/.test(id);
+// A tag picked by the person is used by its ID's family: tags about places (cuisines, activities,
+// settings, what a place is good for...) filter places; genres go on the map. Families measured
+// 2026-10-03 on /v2/tags (farmers markets, brunch, bookstores, hiking, yoga, street art).
+const placeFamily = (id: string) =>
+  /^urn:tag:((cuisine|activity_type|specialty_dish|setting|amenity|interests|category|good_for|dining_option|view|decor|activities)[:]|[a-z_]+:place:)/.test(id);
+// "Not it?" only offers a tag that can act, and acts the same way when picked by its ID.
+const canAct = (t: Tag) => (placeFamily(t.id) ? placeTag(t) : musicTag(t) || mediaTag(t));
 
 const TYPE_WORD: Record<string, string> = {
   "urn:entity:artist": "artist", "urn:entity:movie": "film", "urn:entity:tv_show": "TV show", "urn:entity:book": "book",
@@ -169,7 +174,9 @@ async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Reso
 async function resolveTag(q: Qloo, it: Interest): Promise<Resolved | null> {
   const list = (await q.tags(term(it), 20)).filter((t) => resembles(term(it), t.name));
   if (!list.length) return null;
-  const exact = list.filter((t) => normalizeName(t.name) === normalizeName(term(it)));
+  // An exact name only counts if one of its tags can act (a media keyword alone can't); otherwise the
+  // closest tag that can act is used, flagged as closest.
+  const exact = list.filter((t) => normalizeName(t.name) === normalizeName(term(it)) && (placeTag(t) || musicTag(t) || mediaTag(t)));
   const pool = exact.length ? exact : list;
   const forPlaces = pool.find(placeTag);
   // Yoga and skateboarding are also music genres; when the word means an activity or a food, its
@@ -181,6 +188,7 @@ async function resolveTag(q: Qloo, it: Interest): Promise<Resolved | null> {
   const pick = forMap ?? forPlaces!;
   const names = new Set([normalizeName(pick.name)]);
   const alternatives = list
+    .filter(canAct)
     .filter((t) => {
       const n = normalizeName(t.name);
       if (names.has(n)) return false;
@@ -213,6 +221,7 @@ async function resolveOne(q: Qloo, it: Interest): Promise<Resolved | null> {
     const onPlaces = isTag && placeFamily(it.id);
     return {
       input: it.name,
+      ...(it.query ? { query: it.query } : {}),
       as: it.as ?? it.name,
       id: it.id,
       type: isTag ? "tag" : "entity",
@@ -382,7 +391,7 @@ export async function matchNeighborhoods(
     for (const h of unnamed) h.name = r.names.get(cellKey(h.lat, h.lon)) ?? "";
     if (r.missing) trace.push({ step: "Name", detail: `${r.missing} area${r.missing === 1 ? "" : "s"} had no neighborhood name in Qloo or OpenStreetMap and ${r.missing === 1 ? "was" : "were"} left out` });
   }
-  hoods = mergeByName(hoods.filter((h) => h.name)).slice(0, 5);
+  hoods = mergeByName(hoods.filter((h) => h.name), mode).slice(0, 5);
   if (!hoods.length) throw new AppError(`Qloo scored ${center.name}, but none of the top areas could be named. Please try again later.`, 502);
   trace.push({ step: "Name", detail: `Named the areas from Qloo's place data (the neighborhood of the places found there)${unnamed.length ? `; OpenStreetMap for ${unnamed.length} without one` : ""}` });
 
@@ -520,19 +529,25 @@ function mostCommon(xs: string[]): string | undefined {
   return [...c.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
 }
 
-// Two squares that Qloo puts in the same neighborhood become one entry (the better score, all places).
-function mergeByName(hoods: Neighborhood[]): Neighborhood[] {
+// Two areas that Qloo puts in the same neighborhood become one entry with all their places. In map
+// mode its numbers stay those of its best square (what the page states: that square's mean over its
+// cells); in places mode the matching places add up.
+function mergeByName(hoods: Neighborhood[], mode: MatchResult["mode"]): Neighborhood[] {
   const out: Neighborhood[] = [];
   for (const h of hoods) {
     const same = out.find((o) => nameKey(o.name) === nameKey(h.name));
     if (!same) out.push(h);
     else {
-      same.cells += h.cells;
+      if (mode === "places") {
+        same.cells += h.cells;
+        same.affinity += h.affinity;
+        same.score += h.score;
+      }
       same.evidence.push(...h.evidence);
       same.matches.push(...h.matches);
     }
   }
-  return out;
+  return mode === "places" ? out.sort((a, b) => b.cells - a.cells || b.affinity - a.affinity) : out;
 }
 
 // A place is listed once, under the neighborhood nearest to it, best-ranked first; places a newcomer

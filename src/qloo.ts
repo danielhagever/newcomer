@@ -57,7 +57,7 @@ export class QlooError extends AppError {}
 // Measured: tag searches take 3-4 s and heatmaps up to 5.4 s under load.
 const TIMEOUT_MS = 12000;
 
-// Qloo answers 429 to the sixth call within about a second (measured 2026-10-04 after a quiet minute:
+// Qloo answers 429 to the sixth call within about a second (measured 2026-10-03 after a quiet minute:
 // 5 at once all 200, 6 at once lose one, 8 lose three; a steady 4 a second loses the sixth call every
 // time, a steady 3 a second lost none of 24). A search starts one call at most every 340 ms.
 const MIN_GAP_MS = 340;

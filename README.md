@@ -45,7 +45,7 @@ In more than 20 live test searches (Austin, Los Angeles, Brooklyn, Chicago, Port
 - `take` above 50 is a 400 on insights.
 - Cells are geohash-7 (~150 m) for a city and geohash-6 (~1.2 x 0.6 km) for a big county.
 - Cuisine and activity tags have no effect on the heatmap (tags-only heatmap: 0 cells; with entities, `tag_affinity` is null), but filter places well.
-- The sixth call from one key within about a second gets a 429 (2026-10-04, after a quiet minute: 5 at once all pass, 6 lose one, 8 lose three; a steady 4 a second loses the sixth call every time, a steady 3 a second lost none of 24).
+- The sixth call from one key within about a second gets a 429 (2026-10-03, after a quiet minute: 5 at once all pass, 6 lose one, 8 lose three; a steady 4 a second loses the sixth call every time, a steady 3 a second lost none of 24).
 
 ## Use it from an agent
 
@@ -101,7 +101,7 @@ You need Node.js 22 or newer and a free Cloudflare account (Workers, KV and Work
 ```bash
 git clone https://github.com/danielhagever/newcomer && cd newcomer
 npm install
-npm test                                          # 61 tests against a mock Qloo shaped like the live API, no key needed
+npm test                                          # 64 tests against a mock Qloo shaped like the live API, no key needed
 npx wrangler login
 npx wrangler kv namespace create newcomer-cache   # put the id in wrangler.jsonc
 npx wrangler secret put QLOO_API_KEY             # your hackathon key, server-side only
