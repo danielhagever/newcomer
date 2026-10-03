@@ -2,7 +2,7 @@
 
 **Moving to a new city? Find the neighborhood that already likes what you like.**
 
-Live app: https://newcomer.meshulam791.workers.dev · MCP endpoint for agents: `https://newcomer.meshulam791.workers.dev/mcp`
+Live app: https://newcomer.meshulam791.workers.dev · MCP endpoint for agents: `https://newcomer.meshulam791.workers.dev/mcp` · Demo video (2:36): https://youtu.be/7eNXodiunj4
 
 ## The problem
 
