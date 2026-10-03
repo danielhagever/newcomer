@@ -619,3 +619,32 @@ test("Qloo is searched with the English name; the person sees what they wrote", 
     m.restore();
   }
 });
+
+test("Qloo calls are paced: no more than 5 start within a second, the rate Qloo rejects (measured)", async () => {
+  const m = mockFetch(standardQloo());
+  const mocked = globalThis.fetch;
+  const starts: number[] = [];
+  let rejected = 0;
+  globalThis.fetch = (async (input: any, init?: any) => {
+    if (new URL(typeof input === "string" ? input : input.url).host !== "qloo.test") return mocked(input, init);
+    const now = Date.now();
+    starts.push(now);
+    if (starts.filter((t) => now - t < 1000).length > 5) {
+      rejected++;
+      return new Response(JSON.stringify({ errors: [{ message: "rate limited" }] }), { status: 429 });
+    }
+    return mocked(input, init);
+  }) as typeof fetch;
+  try {
+    const names = ["Phoebe Bridgers", "jazz", "ramen", "bouldering", "Dune", "Radiohead"];
+    const { QLOO_MIN_GAP_MS, ...live } = ENV(memoryKV().kv); // the real pacing
+    const r = await matchNeighborhoods(live, new Budget(48), "Austin, Texas", names.map((name) => ({ name })));
+    assert.equal(rejected, 0);
+    assert.ok(starts.length >= 8, `${starts.length} calls`);
+    assert.ok(r.calls.every((c) => c.status === 200));
+    const gaps = starts.slice(1).map((t, i) => t - starts[i]);
+    assert.ok(Math.min(...gaps) >= 330, `smallest gap ${Math.min(...gaps)} ms`);
+  } finally {
+    m.restore();
+  }
+});

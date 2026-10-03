@@ -7,6 +7,7 @@ import { MAX_CITY, MAX_INTERESTS, MAX_NAME, MAX_PARSED, cleanCity, cleanInterest
 export interface Env {
   QLOO_API_KEY?: string;
   QLOO_BASE_URL?: string;
+  QLOO_MIN_GAP_MS?: string;
   CACHE: KVNamespace;
   AI: Ai;
   ASSETS: Fetcher;

@@ -8,7 +8,7 @@
 //   they work as filters on places;
 // - every place carries Qloo's own neighborhood name and time-of-day fit.
 
-import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type Signals, type Tag } from "./qloo.ts";
+import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type QlooEnv, type Signals, type Tag } from "./qloo.ts";
 import { cityCenter, cellKey, km, namesFor } from "./geo.ts";
 import { AppError, type Budget } from "./limits.ts";
 
@@ -230,7 +230,7 @@ async function resolveOne(q: Qloo, it: Interest): Promise<Resolved | null> {
 }
 
 export async function matchNeighborhoods(
-  env: { QLOO_API_KEY?: string; QLOO_BASE_URL?: string; CACHE: KVNamespace },
+  env: QlooEnv & { CACHE: KVNamespace },
   budget: Budget,
   city: string,
   interestsIn: Interest[],

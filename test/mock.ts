@@ -95,4 +95,5 @@ export function memoryKV(opts: { failPuts?: boolean } = {}) {
   return { kv: kv as unknown as KVNamespace, store, ops };
 }
 
-export const ENV = (kv: KVNamespace) => ({ QLOO_API_KEY: "test-key", QLOO_BASE_URL: "https://qloo.test", CACHE: kv });
+// No pacing between Qloo calls in tests (one test checks the real pacing).
+export const ENV = (kv: KVNamespace) => ({ QLOO_API_KEY: "test-key", QLOO_BASE_URL: "https://qloo.test", QLOO_MIN_GAP_MS: "0", CACHE: kv });

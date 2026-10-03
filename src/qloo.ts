@@ -10,6 +10,7 @@ import { AppError, Budget, fetchWithTimeout } from "./limits.ts";
 export interface QlooEnv {
   QLOO_API_KEY?: string;
   QLOO_BASE_URL?: string;
+  QLOO_MIN_GAP_MS?: string; // tests set "0"
 }
 
 export interface Entity {
@@ -56,6 +57,11 @@ export class QlooError extends AppError {}
 // Measured: tag searches take 3-4 s and heatmaps up to 5.4 s under load.
 const TIMEOUT_MS = 12000;
 
+// Qloo answers 429 to the sixth call within about a second (measured 2026-10-04 after a quiet minute:
+// 5 at once all 200, 6 at once lose one, 8 lose three; a steady 4 a second loses the sixth call every
+// time, a steady 3 a second lost none of 24). A search starts one call at most every 340 ms.
+const MIN_GAP_MS = 340;
+
 // Same comparison as the harness's resolver (NFKC, trimmed, lower case).
 export const normalizeName = (s: string) => s.normalize("NFKC").trim().toLocaleLowerCase("en-US");
 
@@ -63,17 +69,30 @@ export class Qloo {
   calls: Provenance[] = [];
   env: QlooEnv;
   budget: Budget;
+  private gap: number;
+  private nextStart = 0;
   constructor(env: QlooEnv, budget: Budget) {
     this.env = env;
     this.budget = budget;
+    const g = Number(env.QLOO_MIN_GAP_MS);
+    this.gap = env.QLOO_MIN_GAP_MS !== undefined && Number.isFinite(g) && g >= 0 ? g : MIN_GAP_MS;
   }
 
-  // One bounded retry: Qloo answers 429 to bursts (seen with 7 place calls at once).
+  // Each call books the next start time when it is made, so calls made together go out in turn.
+  private async turn(): Promise<void> {
+    const now = Date.now();
+    const at = Math.max(now, this.nextStart);
+    this.nextStart = at + this.gap;
+    if (at > now) await new Promise((r) => setTimeout(r, at - now));
+  }
+
+  // One bounded retry: a call from another search at the same moment can still meet a 429.
   private async get(path: string, params: Record<string, string>, retry = true): Promise<any> {
     if (!this.env.QLOO_API_KEY) throw new QlooError("The Qloo API key has not been configured yet.", 503);
     if (!this.budget.take()) throw new QlooError("This search needs more Qloo calls than one request allows. Try fewer interests.", 503);
     const base = this.env.QLOO_BASE_URL ?? "https://hackathon.api.qloo.com";
-    const t = Date.now();
+    await this.turn();
+    const t = Date.now(); // the time Qloo took, not the wait for a turn
     let res: Response;
     try {
       res = await fetchWithTimeout(

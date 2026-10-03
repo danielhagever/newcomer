@@ -37,7 +37,7 @@ Without Qloo, an agent can only repeat what the internet says about neighborhood
 | Taste places per neighborhood | `GET /v2/insights?filter.type=urn:entity:place&filter.location=POINT(lon lat)&filter.location.radius=1200&signal.interests.entities=<ids>&take=8` | Places people with your taste rate highly; their `properties.neighborhood` names the area, their time-of-day tags plan the weekend |
 | Your kinds of places | `GET /v2/insights?filter.type=urn:entity:place&filter.location.query=<city>&filter.tags=<cuisine/activity tags>&operator.filter.tags=union&signal.interests.entities=<ids>&take=50` | Ramen shops, bouldering gyms and natural wine bars, ranked by your taste |
 
-In more than 20 live test searches (Austin, Los Angeles, Brooklyn, Chicago, Portland ME, London, Berlin, Tel Aviv and more) a cold search made 3 to 20 Qloo calls, including retries after a 429, and took 2.6 to 15 seconds; repeats are cached for a day. A search can never make more than 48 external calls in total (a per-request budget in `src/limits.ts`). Place calls run three at a time with one bounded retry, because Qloo answers a burst with 429. Every external call is counted against Cloudflare's free-plan limit of 50 per request, so an optional step stops early rather than failing the search.
+In more than 20 live test searches (Austin, Los Angeles, Brooklyn, Chicago, Portland ME, London, Berlin, Tel Aviv and more) a cold search made 3 to 20 Qloo calls, including retries after a 429, and took 2.6 to 15 seconds; repeats are cached for a day. A search can never make more than 48 external calls in total (a per-request budget in `src/limits.ts`). A search starts a Qloo call at most every 340 ms, with one bounded retry after a 429, because Qloo rejects the sixth call within about a second (measured). Every external call is counted against Cloudflare's free-plan limit of 50 per request, so an optional step stops early rather than failing the search.
 
 ### What the live API taught us (measured 2026-10-03)
 
@@ -45,6 +45,7 @@ In more than 20 live test searches (Austin, Los Angeles, Brooklyn, Chicago, Port
 - `take` above 50 is a 400 on insights.
 - Cells are geohash-7 (~150 m) for a city and geohash-6 (~1.2 x 0.6 km) for a big county.
 - Cuisine and activity tags have no effect on the heatmap (tags-only heatmap: 0 cells; with entities, `tag_affinity` is null), but filter places well.
+- The sixth call from one key within about a second gets a 429 (2026-10-04, after a quiet minute: 5 at once all pass, 6 lose one, 8 lose three; a steady 4 a second loses the sixth call every time, a steady 3 a second lost none of 24).
 
 ## Use it from an agent
 
@@ -100,7 +101,7 @@ You need Node.js 22 or newer and a free Cloudflare account (Workers, KV and Work
 ```bash
 git clone https://github.com/danielhagever/newcomer && cd newcomer
 npm install
-npm test                                          # 58 tests against a mock Qloo shaped like the live API, no key needed
+npm test                                          # 60 tests against a mock Qloo shaped like the live API, no key needed
 npx wrangler login
 npx wrangler kv namespace create newcomer-cache   # put the id in wrangler.jsonc
 npx wrangler secret put QLOO_API_KEY             # your hackathon key, server-side only

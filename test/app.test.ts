@@ -199,6 +199,7 @@ test("the MCP tool tells agents to pass English names with accents kept", async 
 
 test("the page re-sends not-found items with their English name and kind, and labels the bar by mode", () => {
   assert.match(page, /d\.unresolved\.map\(\(name\) => \(d\.interests \|\| \[\]\)\.find\(\(x\) => x\.name === name\) \|\| \{ name \}\)/);
+  assert.match(page, /\(d\.leftOut \|\| \[\]\)\.map\(\(name\) => asked\.find/);
   assert.match(page, /d\.mode === "map" \? "Ranking score/);
 });
 
@@ -208,4 +209,9 @@ test("the one-line answer agrees in number: one runner-up comes next, two come n
   assert.match(summary(r(2)), /Zilker comes next\.$/);
   assert.match(summary(r(3)), /Zilker and Clarksville come next\.$/);
   assert.doesNotMatch(summary(r(1)), /next/);
+});
+
+test("a failed search says Stopped, not Done", () => {
+  assert.match(page, /failed \? "Stopped"/);
+  assert.match(page, /if \(d\.error\) \{ progress\(1, true\)/);
 });
