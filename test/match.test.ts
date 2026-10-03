@@ -523,3 +523,23 @@ test("when the guessed kind is uncertain, the same name in other kinds is offere
     m.restore();
   }
 });
+
+test("your kinds of places are only listed within reach of the neighborhood (no Manhattan bar under Williamsburg)", async () => {
+  const m = mockFetch((c) =>
+    isPlaces(c) && c.params.get("filter.tags")
+      ? { body: { results: { entities: [
+          place("near", "Near Ramen", "Downtown", AUSTIN.latitude + 0.002, AUSTIN.longitude, ["Ramen restaurant"], ["Evening"]),
+          place("far", "Far Ramen", "Elsewhere", AUSTIN.latitude + 0.017, AUSTIN.longitude, ["Ramen restaurant"], ["Evening"]), // ~1.7 km: inside the old 2 km rule
+        ] } } }
+      : standardQloo({ hood: () => "Downtown" })(c),
+  );
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
+    const listed = r.neighborhoods.flatMap((h) => h.matches.map((e) => e.name));
+    assert.ok(listed.includes("Near Ramen"));
+    assert.ok(!listed.includes("Far Ramen"), JSON.stringify(r.neighborhoods.map((h) => [h.name, h.lat, h.lon])));
+  } finally {
+    m.restore();
+  }
+});

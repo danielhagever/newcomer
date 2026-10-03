@@ -355,6 +355,7 @@ export async function matchNeighborhoods(
   trace.push({ step: "Name", detail: `Named the areas from Qloo's place data (the neighborhood of the places found there)${unnamed.length ? `; OpenStreetMap for ${unnamed.length} without one` : ""}` });
 
   // 5. Places that ARE your food and activity tastes, in the top neighborhoods (one city-wide call).
+  const matchReach = mode === "map" ? Math.max(1.2, areaKm(heat.points) * 0.75) : 1.2;
   if (filterTags.length && mode === "map") {
     try {
       const found = await q.places(placeSignals, { query: center.query }, 50, filterTags);
@@ -363,7 +364,10 @@ export async function matchNeighborhoods(
         if (p.lat === undefined || p.lon === undefined) continue;
         const at = { lat: p.lat, lon: p.lon };
         const near = [...hoods].sort((a, b) => km(a, at) - km(b, at))[0];
-        if (near && km(near, at) <= 2) {
+        // Same reach as the taste places around each area (1.2 km; more only for the 2.4 km squares
+        // over a big county). Qloo's city filter reaches a bit past the city: a Manhattan bar must
+        // not be listed under Williamsburg.
+        if (near && km(near, at) <= matchReach) {
           near.matches.push(p);
           kept++;
         }
