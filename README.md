@@ -67,7 +67,7 @@ When a name was only a closest match, the tool's text answer says so and lists t
 
 ## Request to result, redacted
 
-A real run on 2026-10-04 (no personal data; the key is not shown anywhere).
+A real run on 2026-10-03 (no personal data; the key is not shown anywhere).
 
 **Input:** "Moving to Austin, Texas. I love Phoebe Bridgers, The Bear, ramen, bouldering, natural wine."
 
@@ -79,7 +79,7 @@ A real run on 2026-10-04 (no personal data; the key is not shown anywhere).
 6. **Taste places downtown:** Stevie Ray Vaughan Statue, Franklin Barbecue, Austin City Limits Live.
 7. **Weekend:** Saturday downtown: Stevie Ray Vaughan Statue (morning), Franklin Barbecue (afternoon), ACL Live (evening). Sunday in Brentwood: épicerie (morning), EurAsia Ramen (afternoon).
 
-16 Qloo calls; the page's "How we know" panel lists each one with its parameters, status, count and time.
+14 Qloo calls; the page's "How we know" panel lists each one with its parameters, status, count and time.
 
 ## Known limitations
 
