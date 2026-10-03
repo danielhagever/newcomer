@@ -336,16 +336,19 @@ export async function matchNeighborhoods(
     const nearby = new Map(candidates.map((h) => [h, cityMatches.filter((p) => km(h, { lat: p.lat!, lon: p.lon! }) <= reach).length]));
     const boosted = (h: Neighborhood) => h.affinity + 0.03 * Math.min(nearby.get(h) ?? 0, 3);
     for (const h of candidates) h.score = boosted(h);
-    hoods = [...candidates].sort((a, b) => b.score - a.score).slice(0, 7);
+    // Well-covered squares stay ahead of the sparse ones on the city's edge (as in rankAreas).
+    const minCells = minCellsFor(heat.points);
+    const full = (h: Neighborhood) => (h.cells >= minCells ? 1 : 0);
+    hoods = [...candidates].sort((a, b) => full(b) - full(a) || b.score - a.score).slice(0, 7);
     trace.push({
       step: "Areas",
       detail:
         `Grouped the cells into areas of about ${areaKm(heat.points)} km and kept the 7 with the highest mean affinity` +
-        (cityMatches.length ? `, counting your kinds of places within ${reach.toFixed(1)} km (Qloo found ${cityMatches.length} in the city)` : ""),
+        (cityMatches.length ? `, plus 0.03 for each of your kinds of places within ${reach.toFixed(1)} km, up to three (Qloo found ${cityMatches.length} in the city)` : ""),
     });
 
     // 4. Evidence: the places Qloo ranks highest for the same tastes around each area, three calls at
-    // a time (Qloo answers 429 to a burst of seven).
+    // a time (each Qloo call is also paced, see qloo.ts).
     await inBatches(hoods, 3, async (h) => {
       try {
         h.evidence = await q.places(placeSignals, { lat: h.lat, lon: h.lon, radiusM: 1200 }, 8);
@@ -421,7 +424,7 @@ export async function matchNeighborhoods(
     limits: [
       "Qloo affinities describe what groups of people in an area tend to like, not what any one person will do or feel.",
       "Taste fit is one input. Rent, commute, schools and safety are not part of this result.",
-      "Food and activity tastes choose the places shown; Qloo's taste map itself comes from artists, shows, films, books, podcasts and genres.",
+      "Food and activity tastes choose the places shown and give a small boost to areas near them; Qloo's taste map itself comes from artists, shows, films, books, podcasts and genres.",
       "Neighborhood names are Qloo's (from its place data) and may not match local usage exactly.",
     ],
     ours: [
@@ -430,7 +433,7 @@ export async function matchNeighborhoods(
         : "With only food and activity tastes, neighborhoods are ranked by how many matching places Qloo found there (Newcomer's rule).",
       "Each weekend stop is the best-ranked place for that part of the day by Qloo's time-of-day tags; tattoo shops, salons and hotels are skipped unless they serve food or drink (Newcomer's rules).",
       "Schools, offices, places of worship, transit stations, recording studios and similar places are left out of the lists, since a newcomer can't visit them (Newcomer's rule).",
-      ...(unsure.length ? ["Where a name wasn't one exact match, the first Qloo candidate was used; you can pick another."] : []),
+      ...(unsure.length ? ["Where a name wasn't one exact match, the first Qloo candidate that resembles it was used; you can pick another."] : []),
     ],
     degraded,
     trace,
@@ -460,12 +463,17 @@ function cellLength(points: HeatPoint[]): number {
 const areaStep = (len: number) => (len >= 7 ? 0.01 : len === 6 ? 0.022 : 0); // degrees: about 1 km, about 2.4 km, or the cell itself
 export const areaKm = (points: HeatPoint[]) => (cellLength(points) >= 7 ? 1 : cellLength(points) === 6 ? 2.4 : 5);
 
-// Group cells on a grid sized to the cells, and rank squares by the mean percentile of all their
-// cells. Squares with few cells sit on the city's edge: they need about 40% of a full square.
-export function rankAreas(points: HeatPoint[], keep = 7): Neighborhood[] {
+// Squares with fewer cells sit on the city's edge: a full one needs about 40% of a square's cells.
+const minCellsFor = (points: HeatPoint[]) => {
   const len = cellLength(points);
-  const step = areaStep(len);
-  const minCells = len >= 7 ? 6 : len === 6 ? 3 : 1;
+  return len >= 7 ? 6 : len === 6 ? 3 : 1;
+};
+
+// Group cells on a grid sized to the cells, and rank squares by the mean percentile of all their
+// cells, well-covered squares first.
+export function rankAreas(points: HeatPoint[], keep = 7): Neighborhood[] {
+  const step = areaStep(cellLength(points));
+  const minCells = minCellsFor(points);
   const groups = new Map<string, { lat: number; lon: number; sum: number; n: number }>();
   for (const p of points) {
     const key = step ? `${Math.floor(p.lat / step)},${Math.floor(p.lon / step)}` : (p.geohash ?? `${p.lat},${p.lon}`);

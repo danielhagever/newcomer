@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { matchNeighborhoods, planDay, rankAreas, resembles } from "../src/match.ts";
 import { signalParams } from "../src/qloo.ts";
-import { cityCenter } from "../src/geo.ts";
+import { cityCenter, km } from "../src/geo.ts";
 import { AppError, Budget } from "../src/limits.ts";
 import { AUSTIN, ENV, heatmap, memoryKV, mockFetch, place, places, tag, type Call } from "./mock.ts";
 
@@ -545,10 +545,12 @@ test("your kinds of places are only listed within reach of the neighborhood (no 
 });
 
 test("your kinds of places within reach lift an area (0.03 each, up to three)", async () => {
-  // The best square (mean ~0.96) has no ramen nearby; the runner-up (~0.89, close behind) has three
+  // The best square (mean ~0.98) has no ramen nearby; the runner-up (~0.93, 0.05 behind) has three
   // ramen shops, so +0.09 puts it first. A square far behind would not move (the boost is small).
-  const heat = heatmap(AUSTIN.latitude, AUSTIN.longitude, 9, 8);
-  const cLat = AUSTIN.latitude + 0.012 + 0.00175, cLon = AUSTIN.longitude; // square g=1
+  // Squares placed inside the 0.01-degree grid, so none is split into sparse pieces.
+  const lat0 = 30.2621;
+  const heat = heatmap(lat0, AUSTIN.longitude, 20, 8);
+  const cLat = lat0 + 0.012 + 0.00175, cLon = AUSTIN.longitude; // square g=1
   const m = mockFetch((c) =>
     isPlaces(c) && c.params.get("filter.tags")
       ? { body: { results: { entities: [0, 1, 2].map((i) => place(`r${i}`, `Ramen ${i}`, "Ramen Row", cLat + i * 0.001, cLon, ["Ramen restaurant"], ["Evening"])) } } }
@@ -644,6 +646,24 @@ test("Qloo calls are paced: no more than 5 start within a second, the rate Qloo 
     assert.ok(r.calls.every((c) => c.status === 200));
     const gaps = starts.slice(1).map((t, i) => t - starts[i]);
     assert.ok(Math.min(...gaps) >= 330, `smallest gap ${Math.min(...gaps)} ms`);
+  } finally {
+    m.restore();
+  }
+});
+
+test("a square with only a few cells (the city's edge) never outranks well-covered squares", async () => {
+  const body = heatmap(AUSTIN.latitude, AUSTIN.longitude, 3, 8) as any;
+  const edge = { lat: AUSTIN.latitude + 0.2, lon: AUSTIN.longitude + 0.2 };
+  // Two cells alone in their square, hotter than any other cell.
+  body.results.heatmap.unshift(
+    { location: { latitude: edge.lat, longitude: edge.lon, geohash: "9v6zzzz" }, query: { affinity: 1 } },
+    { location: { latitude: edge.lat + 0.0005, longitude: edge.lon, geohash: "9v6zzzy" }, query: { affinity: 0.999 } },
+  );
+  const m = mockFetch(standardQloo({ heat: () => body }));
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.ok(km(r.neighborhoods[0], edge) > 5, "the edge square is not first");
+    assert.ok(r.neighborhoods.some((h) => km(h, edge) < 1), "it still fills in after the full squares");
   } finally {
     m.restore();
   }

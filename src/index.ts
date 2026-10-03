@@ -26,7 +26,7 @@ const failure = (e: unknown) => {
 };
 
 // Bump whenever the pipeline or the result format changes, so no one gets yesterday's logic.
-const CACHE_VERSION = 10;
+const CACHE_VERSION = 11;
 
 // Returns the result and whether it came from the day's cache (the page says so: the timings in
 // "How we know" are from the run that made it).
