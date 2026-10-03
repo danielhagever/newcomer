@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import worker from "../src/index.ts";
+import worker, { summary } from "../src/index.ts";
 import { cleanInterests, fallbackInterests } from "../src/input.ts";
 import { ENV, memoryKV, mockFetch, places, heatmap, tag, AUSTIN } from "./mock.ts";
 
@@ -195,4 +195,17 @@ test("the MCP tool tells agents to pass English names with accents kept", async 
   });
   const text = await (await worker.fetch(list, env())).text();
   assert.match(text, /English name as Qloo knows it/);
+});
+
+test("the page re-sends not-found items with their English name and kind, and labels the bar by mode", () => {
+  assert.match(page, /d\.unresolved\.map\(\(name\) => \(d\.interests \|\| \[\]\)\.find\(\(x\) => x\.name === name\) \|\| \{ name \}\)/);
+  assert.match(page, /d\.mode === "map" \? "Ranking score/);
+});
+
+test("the one-line answer agrees in number: one runner-up comes next, two come next", () => {
+  const hood = (name: string) => ({ name, lat: 0, lon: 0, affinity: 0.8, score: 0.8, cells: 6, evidence: [], matches: [] });
+  const r = (n: number) => ({ city: "Austin, Texas", neighborhoods: ["Downtown", "Zilker", "Clarksville"].slice(0, n).map(hood) }) as any;
+  assert.match(summary(r(2)), /Zilker comes next\.$/);
+  assert.match(summary(r(3)), /Zilker and Clarksville come next\.$/);
+  assert.doesNotMatch(summary(r(1)), /next/);
 });

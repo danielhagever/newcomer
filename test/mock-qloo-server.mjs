@@ -41,13 +41,13 @@ createServer((req, res) => {
   if (Number(p.get("take") ?? 0) > 50) return send(res, { errors: [{ message: "take must be an integer value between 1 and 50", path: "take" }] }, 400);
   if (u.pathname === "/search") {
     const q = p.get("query") ?? "";
-    if (/^dune$/i.test(q)) return send(res, { results: [{ entity_id: uuid(11), name: "Dune", disambiguation: "2021 (mock)", types: ["urn:entity:movie"] }, { entity_id: uuid(12), name: "Dune", disambiguation: "1984 (mock)", types: ["urn:entity:movie"] }] });
-    if (/zz/i.test(q)) return send(res, { results: [] });
-    return send(res, { results: [{ entity_id: uuid(q.length + 100), name: q, disambiguation: "(mock)", types: [p.get("types") ?? "urn:entity:artist"] }] });
+    if (/^dune$/i.test(q)) return send(res, { results: [{ entity_id: uuid(11), name: "Dune", disambiguation: "2021, mock", types: ["urn:entity:movie"] }, { entity_id: uuid(12), name: "Dune", disambiguation: "1984, mock", types: ["urn:entity:movie"] }] });
+    if (/^zzz/i.test(q)) return send(res, { results: [] }); // "zzz..." stands for a name Qloo doesn't know
+    return send(res, { results: [{ entity_id: uuid(q.length + 100), name: q, disambiguation: "mock", types: [p.get("types") ?? "urn:entity:artist"] }] });
   }
   if (u.pathname === "/v2/tags") {
     const q = (p.get("filter.query") ?? "").toLowerCase();
-    if (/zz/.test(q)) return send(res, { results: { tags: [] } });
+    if (/^zzz/.test(q)) return send(res, { results: { tags: [] } });
     const slug = q.replace(/\W+/g, "_");
     const name = q.replace(/^\w/, (c) => c.toUpperCase());
     const music = /jazz|techno|punk|hip hop|indie/.test(q);
@@ -68,7 +68,7 @@ createServer((req, res) => {
       return send(res, { results: { entities: [0, 1, 2, 3, 4, 5].map((i) => place(200 + i, `Your Kind of Place ${i + 1} (mock)`, lat - 0.02 + i * 0.008, lon - 0.02 + i * 0.008, ["Restaurant"], ["Evening", "Midday"])) } });
     }
     const kinds = [["Coffee (mock)", "Coffee shop", ["Morning"]], ["Gallery (mock)", "Art gallery", ["Afternoon"]], ["Record Store (mock)", "Record store", ["Midday", "Afternoon"]], ["Music Venue (mock)", "Live music venue", ["Evening"]]];
-    return send(res, { results: { entities: kinds.map(([n, c, t], i) => place(100 + i + Math.round(lat * 1000) % 50, `${n} ${i + 1}`, lat + (i - 1.5) * 0.002, lon + (i % 2 ? 0.002 : -0.002), [c], t)) } });
+    return send(res, { results: { entities: kinds.map(([n, c, t], i) => place(100 + i + Math.round(lat * 1000) % 50, `${n} ${100 + i + Math.round(lat * 1000) % 50}`, lat + (i - 1.5) * 0.002, lon + (i % 2 ? 0.002 : -0.002), [c], t)) } });
   }
   send(res, { errors: [{ message: "not mocked" }] }, 404);
 }).listen(8799, () => console.log("mock Qloo on http://localhost:8799"));

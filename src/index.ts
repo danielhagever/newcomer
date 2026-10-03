@@ -68,7 +68,7 @@ export function summary(r: MatchResult): string {
     .slice(0, 2)
     .map((e) => e.name)
     .join(" and ");
-  const next = b ? ` ${b.name}${c ? ` and ${c.name}` : ""} come next.` : "";
+  const next = b ? ` ${b.name}${c ? ` and ${c.name} come` : " comes"} next.` : "";
   return `In ${r.city}, ${a.name} fits your taste best${ev ? `: think ${ev}` : ""}.${next}`;
 }
 

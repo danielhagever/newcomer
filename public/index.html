@@ -178,7 +178,7 @@ function render(d) {
   const hoods = d.neighborhoods.map((h, i) => `
     <div class="hood" role="button" tabindex="0" aria-label="Show ${esc(h.name)} on the map" data-lat="${h.lat}" data-lon="${h.lon}">
       <h3><span class="rank">#${i + 1}</span>${esc(h.name)}</h3>
-      <div class="bar" title="Ranking score relative to the best match: Qloo's percentile plus your kinds of places nearby"><i style="width:${Math.round((sc(h) / max) * 100)}%"></i></div>
+      <div class="bar" title="${d.mode === "map" ? "Ranking score relative to the best match: Qloo's percentile plus your kinds of places nearby" : "Relative to the best match: share of your kinds of places"}"><i style="width:${Math.round((sc(h) / max) * 100)}%"></i></div>
       <div class="m">${score(h)}</div>
       ${h.matches.length ? `<div class="m" style="margin-top:10px"><b>Your kind of places here</b></div>${h.matches.map(place).join("")}` : ""}
       ${h.evidence.length ? `<div class="m" style="margin-top:10px"><b>Places people with your taste rate highly</b></div>${h.evidence.map(place).join("")}` : ""}
@@ -229,12 +229,13 @@ function wireChoices(d) {
     const interests = d.resolved.map((r, i) => {
       const s = document.querySelector(`#picks select[data-i="${i}"]`);
       const opt = s && s.value ? s.selectedOptions[0] : null;
-      // Only a changed item is pinned to an ID; the rest are looked up again by name, as before.
+      // Only a changed item is pinned to an ID; the rest are looked up again by name, as before, and
+      // not-found items are sent as they were (with their English name and kind).
       const base = { name: r.input, ...(r.query ? { query: r.query } : {}), ...(r.kind ? { kind: r.kind } : {}) };
       if (opt) return { ...base, id: s.value, as: opt.dataset.name };
       if (r.match === "chosen") return { ...base, id: r.id, as: r.as };
       return base;
-    }).concat(d.unresolved.map((name) => ({ name })));
+    }).concat(d.unresolved.map((name) => (d.interests || []).find((x) => x.name === name) || { name }));
     redo.disabled = true; $("go").disabled = true; progress(1);
     try { await search({ city: $("city").value, interests }); } catch { $("results").innerHTML = `<div class="card">Something went wrong. Please try again.</div>`; }
     finally { $("go").disabled = false; }
