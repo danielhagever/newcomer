@@ -70,7 +70,7 @@ test("a result is cached for a day; a degraded one is not", async () => {
   try {
     const { kv, store } = memoryKV();
     await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "Phoebe Bridgers", kind: "artist" }] }), env(kv));
-    assert.equal([...store.keys()].filter((k) => k.startsWith("match7:")).length, 1);
+    assert.equal([...store.keys()].filter((k) => k.startsWith("match8:")).length, 1);
   } finally {
     m.restore();
   }
@@ -79,7 +79,7 @@ test("a result is cached for a day; a degraded one is not", async () => {
     const { kv, store } = memoryKV();
     const r = await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "Phoebe Bridgers", kind: "artist" }] }), env(kv));
     assert.equal(r.status, 200);
-    assert.equal([...store.keys()].filter((k) => k.startsWith("match7:")).length, 0);
+    assert.equal([...store.keys()].filter((k) => k.startsWith("match8:")).length, 0);
   } finally {
     broken.restore();
   }

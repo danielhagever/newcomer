@@ -543,3 +543,25 @@ test("your kinds of places are only listed within reach of the neighborhood (no 
     m.restore();
   }
 });
+
+test("your kinds of places within reach lift an area (0.03 each, up to three)", async () => {
+  // The best square (mean ~0.96) has no ramen nearby; the runner-up (~0.89, close behind) has three
+  // ramen shops, so +0.09 puts it first. A square far behind would not move (the boost is small).
+  const heat = heatmap(AUSTIN.latitude, AUSTIN.longitude, 9, 8);
+  const cLat = AUSTIN.latitude + 0.012 + 0.00175, cLon = AUSTIN.longitude; // square g=1
+  const m = mockFetch((c) =>
+    isPlaces(c) && c.params.get("filter.tags")
+      ? { body: { results: { entities: [0, 1, 2].map((i) => place(`r${i}`, `Ramen ${i}`, "Ramen Row", cLat + i * 0.001, cLon, ["Ramen restaurant"], ["Evening"])) } } }
+      : isHeat(c) ? { body: heat } : standardQloo()(c),
+  );
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
+    const order = JSON.stringify(r.neighborhoods.map((h) => [h.name, h.affinity.toFixed(3), h.matches.length]));
+    assert.ok(r.neighborhoods[0].affinity < r.neighborhoods[1].affinity, `the boost lifted a lower map score to first: ${order}`);
+    assert.equal(r.neighborhoods.reduce((n, h) => n + h.matches.length, 0), 3, order);
+    assert.ok(r.ours.some((o) => /0\.03 for each of your kinds of places/.test(o)));
+  } finally {
+    m.restore();
+  }
+});

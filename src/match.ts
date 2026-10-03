@@ -289,6 +289,7 @@ export async function matchNeighborhoods(
   let qlooCity: string | undefined;
 
   let heat: Awaited<ReturnType<Qloo["heatmap"]>> = { points: [] };
+  let cityMatches: Entity[] = [];
   if (mode === "map") {
     // 2. Where in the city do people who share these tastes concentrate? Qloo is asked about the
     // same city Newcomer located, and the locality it used is checked against it.
@@ -312,8 +313,27 @@ export async function matchNeighborhoods(
     // 3. Areas: squares of about 1 km (2.4 km where Qloo's cells are coarser), ranked by the mean
     // percentile of all their cells (Newcomer's rule, labeled on the page), so one hot block doesn't
     // outrank a whole hot area.
-    hoods = rankAreas(heat.points);
-    trace.push({ step: "Areas", detail: `Grouped the cells into areas of about ${areaKm(heat.points)} km and kept the ${hoods.length} with the highest mean affinity` });
+    // Your kinds of places (one city-wide call) also count: an area with ramen shops and natural wine
+    // bars within reach gets a small boost (Newcomer's rule, labeled), so the food and activity tastes
+    // you typed change which neighborhoods are chosen, not only what is listed.
+    const candidates = rankAreas(heat.points, 25);
+    if (filterTags.length) {
+      try {
+        cityMatches = (await q.places(placeSignals, { query: center.query }, 50, filterTags)).filter((p) => p.lat !== undefined && p.lon !== undefined && visitable(p));
+      } catch {
+        degraded = true;
+      }
+    }
+    const reach = Math.max(1.2, areaKm(heat.points) * 0.75);
+    const nearby = new Map(candidates.map((h) => [h, cityMatches.filter((p) => km(h, { lat: p.lat!, lon: p.lon! }) <= reach).length]));
+    const boosted = (h: Neighborhood) => h.affinity + 0.03 * Math.min(nearby.get(h) ?? 0, 3);
+    hoods = [...candidates].sort((a, b) => boosted(b) - boosted(a)).slice(0, 7);
+    trace.push({
+      step: "Areas",
+      detail:
+        `Grouped the cells into areas of about ${areaKm(heat.points)} km and kept the 7 with the highest mean affinity` +
+        (cityMatches.length ? `, counting your kinds of places within ${reach.toFixed(1)} km (Qloo found ${cityMatches.length} in the city)` : ""),
+    });
 
     // 4. Evidence: the places Qloo ranks highest for the same tastes around each area, three calls at
     // a time (Qloo answers 429 to a burst of seven).
@@ -354,31 +374,23 @@ export async function matchNeighborhoods(
   if (!hoods.length) throw new AppError(`Qloo scored ${center.name}, but none of the top areas could be named. Please try again later.`, 502);
   trace.push({ step: "Name", detail: `Named the areas from Qloo's place data (the neighborhood of the places found there)${unnamed.length ? `; OpenStreetMap for ${unnamed.length} without one` : ""}` });
 
-  // 5. Places that ARE your food and activity tastes, in the top neighborhoods (one city-wide call).
-  const matchReach = mode === "map" ? Math.max(1.2, areaKm(heat.points) * 0.75) : 1.2;
-  if (filterTags.length && mode === "map") {
-    try {
-      const found = await q.places(placeSignals, { query: center.query }, 50, filterTags);
-      let kept = 0;
-      for (const p of found) {
-        if (p.lat === undefined || p.lon === undefined) continue;
-        const at = { lat: p.lat, lon: p.lon };
-        const near = [...hoods].sort((a, b) => km(a, at) - km(b, at))[0];
-        // Same reach as the taste places around each area (1.2 km; more only for the 2.4 km squares
-        // over a big county). Qloo's city filter reaches a bit past the city: a Manhattan bar must
-        // not be listed under Williamsburg.
-        if (near && km(near, at) <= matchReach) {
-          near.matches.push(p);
-          kept++;
-        }
+  // 5. Your kinds of places (found before the ranking) go under the neighborhood within reach. Qloo's
+  // city filter reaches a bit past the city: a Manhattan bar must not be listed under Williamsburg.
+  if (mode === "map" && cityMatches.length) {
+    const reach = Math.max(1.2, areaKm(heat.points) * 0.75);
+    let kept = 0;
+    for (const p of cityMatches) {
+      const at = { lat: p.lat!, lon: p.lon! };
+      const near = [...hoods].sort((a, b) => km(a, at) - km(b, at))[0];
+      if (near && km(near, at) <= reach) {
+        near.matches.push(p);
+        kept++;
       }
-      trace.push({ step: "Your places", detail: `Qloo found ${found.length} places in the city that are one of your food or activity tastes; ${kept} are in the top neighborhoods` });
-    } catch {
-      degraded = true;
     }
+    trace.push({ step: "Your places", detail: `Qloo found ${cityMatches.length} places in the city that are one of your food or activity tastes; ${kept} are in the neighborhoods shown` });
   }
   const dropped = dedupeEvidence(hoods);
-  if (dropped) trace.push({ step: "Filter", detail: `Left out ${dropped} places a newcomer can't visit (schools, offices, places of worship, stations, studios and the like)` });
+  if (dropped) trace.push({ step: "Filter", detail: `Left out ${dropped} ${dropped === 1 ? "place" : "places"} a newcomer can't visit (schools, offices, places of worship, stations, studios and the like)` });
 
   // 6. A weekend to test the move before signing a lease: one place per part of the day, from
   // Qloo's time-of-day fit for each place.
@@ -405,7 +417,7 @@ export async function matchNeighborhoods(
     ],
     ours: [
       mode === "map"
-        ? "Areas are squares of about 1 km (2.4 km where Qloo's cells are coarser) ranked by the mean Qloo percentile of all their map cells, so one hot block can't outrank a whole hot area (Newcomer's rule)."
+        ? "Areas are squares of about 1 km (2.4 km where Qloo's cells are coarser) ranked by the mean Qloo percentile of all their map cells, so one hot block can't outrank a whole hot area, plus 0.03 for each of your kinds of places within reach, up to three (Newcomer's rules)."
         : "With only food and activity tastes, neighborhoods are ranked by how many matching places Qloo found there (Newcomer's rule).",
       "Each weekend stop is the best-ranked place for that part of the day by Qloo's time-of-day tags; tattoo shops, salons and hotels are skipped unless they serve food or drink (Newcomer's rules).",
       "Schools, offices, places of worship, transit stations, recording studios and similar places are left out of the lists, since a newcomer can't visit them (Newcomer's rule).",

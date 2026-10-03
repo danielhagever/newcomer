@@ -25,7 +25,7 @@ const failure = (e: unknown) => {
 };
 
 // Bump whenever the pipeline or the result format changes, so no one gets yesterday's logic.
-const CACHE_VERSION = 7;
+const CACHE_VERSION = 8;
 
 async function cachedMatch(env: Env, budget: Budget, city: string, interests: Interest[]): Promise<MatchResult> {
   const key = `match${CACHE_VERSION}:` + (await sha(JSON.stringify([city.toLowerCase(), interests.map((i) => [i.name.toLowerCase(), i.kind ?? "", i.id ?? ""])])));

@@ -14,7 +14,7 @@ Newcomer answers a personal question with evidence: **where in this city do the 
 
 1. **Understands your taste.** You write what you love in plain words ("Phoebe Bridgers, The Bear, ramen, bouldering, natural wine"). A model turns that into typed interests, and Newcomer resolves each one in Qloo's taste graph the way Qloo's own harness does: artists, shows and films are searched as Qloo entities (5 candidates), cuisines, activities and genres as Qloo tags (semantic search, 20 candidates), and only an exact name counts as a match. When there is no exact name, or several things share it (two films called "Dune"), the first candidate is used, the page says so, and "Not it?" lets you pick another and run again; it also offers the same name in other kinds (the model may have guessed "Dune" is the book when you meant the film). Anything Qloo doesn't know is reported, not guessed.
 2. **Finds where that taste lives.** Qloo's heatmap scores every map cell of the city for the people who like your artists, shows, films and music genres. Food and activity tastes don't move Qloo's heatmap (measured: they come back with no tag affinity), so they are used where they work: to pick places. Qloo is asked about the city Newcomer located, and the locality Qloo used is shown ("Qloo read the city as Portland, Cumberland County, Maine") and checked against it.
-3. **Names the neighborhoods.** The cells are grouped into squares of about 1 km (2.4 km where Qloo's cells are coarser, as over Los Angeles County) and ranked by the mean percentile of all their cells, so one hot block can't outrank a whole hot area. Each square is named by the neighborhood Qloo gives the places there; OpenStreetMap only fills in where Qloo has no name.
+3. **Names the neighborhoods.** The cells are grouped into squares of about 1 km (2.4 km where Qloo's cells are coarser, as over Los Angeles County) and ranked by the mean percentile of all their cells, so one hot block can't outrank a whole hot area; an area with your kinds of places within reach (ramen shops, bouldering gyms) gets a small boost, so every taste you typed counts. Each square is named by the neighborhood Qloo gives the places there; OpenStreetMap only fills in where Qloo has no name.
 4. **Shows the evidence.** For each neighborhood: the places that ARE your food and activity tastes (Qloo place search filtered by those tags), and the places that people with your taste rate highly (Qloo places within 1.2 km, ranked by your taste signals). Schools, offices, places of worship and similar places are left out.
 5. **Plans a scouting weekend.** Saturday in the best match and Sunday in the runner-up: one place per part of the day, using Qloo's own time-of-day fit for each place.
 6. **Shows its work.** A "How we know" panel lists every Qloo call with its parameters (the key never leaves the server), status, result count and time, then Newcomer's own rules, then the limits of the result.
@@ -37,7 +37,7 @@ Without Qloo, an agent can only repeat what the internet says about neighborhood
 | Taste places per neighborhood | `GET /v2/insights?filter.type=urn:entity:place&filter.location=POINT(lon lat)&filter.location.radius=1200&signal.interests.entities=<ids>&take=8` | Places people with your taste rate highly; their `properties.neighborhood` names the area, their time-of-day tags plan the weekend |
 | Your kinds of places | `GET /v2/insights?filter.type=urn:entity:place&filter.location.query=<city>&filter.tags=<cuisine/activity tags>&operator.filter.tags=union&signal.interests.entities=<ids>&take=50` | Ramen shops, bouldering gyms and natural wine bars, ranked by your taste |
 
-In 17 live test searches (Austin, Los Angeles, Brooklyn, Chicago, Portland ME, London, Berlin, Tel Aviv and more) a cold search made 3 to 17 Qloo calls, including 0 to 3 retries after a 429, and took 2.6 to 15 seconds; repeats are cached for a day. A search can never make more than 48 external calls in total (the budget below). Place calls run three at a time with one bounded retry, because Qloo answers a burst with 429. Every external call is counted against Cloudflare's free-plan limit of 50 per request, so an optional step stops early rather than failing the search.
+In more than 20 live test searches (Austin, Los Angeles, Brooklyn, Chicago, Portland ME, London, Berlin, Tel Aviv and more) a cold search made 3 to 20 Qloo calls, including retries after a 429, and took 2.6 to 15 seconds; repeats are cached for a day. A search can never make more than 48 external calls in total (the budget below). Place calls run three at a time with one bounded retry, because Qloo answers a burst with 429. Every external call is counted against Cloudflare's free-plan limit of 50 per request, so an optional step stops early rather than failing the search.
 
 ### What the live API taught us (measured 2026-10-03)
 
@@ -64,17 +64,17 @@ When a name was only a closest match, the tool's text answer says so and lists t
 
 ## Request to result, redacted
 
-A real run on 2026-10-03 (no personal data; the key is not shown anywhere).
+A real run on 2026-10-04 (no personal data; the key is not shown anywhere).
 
 **Input:** "Moving to Austin, Texas. I love Phoebe Bridgers, The Bear, ramen, bouldering, natural wine."
 
 1. **Parsed** (Workers AI): Phoebe Bridgers (artist), The Bear (TV show), ramen, bouldering, natural wine (tastes).
 2. **Resolved in Qloo:** Phoebe Bridgers → artist `AFBC71A7-…` (exact); The Bear → TV show `4C305B2F-…` "The Bear (2022,2026)" (exact); ramen → `urn:tag:cuisine:qloo:ramen`, bouldering → `urn:tag:activity_type:qloo:bouldering`, natural wine → `urn:tag:cuisine:qloo:natural_wine` (exact names; place tags, so they pick places).
 3. **Heatmap:** Qloo read the city as "Austin, Travis County, Texas, United States" and scored 1,435 cells for the artist and the show.
-4. **Areas:** cells grouped into ~1 km squares; the top squares by mean percentile were named from Qloo's places: Downtown (mean 0.79, 105 cells), Brentwood (0.72), Clarksville (0.71), Zilker (0.70), Travis Heights (0.69).
-5. **Your kinds of places:** Qloo found 25 ramen, bouldering and natural wine places in Austin; 6 are in those neighborhoods (LoLo and Ramen Tatsu-Ya downtown; Bufalina Due and Michi Ramen in Brentwood).
+4. **Your kinds of places:** one city-wide Qloo place search filtered by the three place tags found 25 ramen, bouldering and natural wine places.
+5. **Areas:** cells grouped into ~1 km squares, ranked by mean percentile plus 0.03 per matching place within 1.2 km, named from Qloo's places: Downtown (mean 0.79), Brentwood (0.72; EurAsia Ramen), Zilker (0.70; Ramen Tatsu-Ya), East Cesar Chavez (0.65; LoLo and Ramen Tatsu-Ya, lifted by them), Clarksville (0.71).
 6. **Taste places downtown:** Stevie Ray Vaughan Statue, Franklin Barbecue, Austin City Limits Live.
-7. **Weekend:** Saturday downtown: Stevie Ray Vaughan Statue (morning), LoLo (afternoon), ACL Live (evening). Sunday in Brentwood: épicerie, Bufalina Due, Michi Ramen.
+7. **Weekend:** Saturday downtown: Stevie Ray Vaughan Statue (morning), Franklin Barbecue (afternoon), ACL Live (evening). Sunday in Brentwood: épicerie (morning), EurAsia Ramen (afternoon).
 
 16 Qloo calls; the page's "How we know" panel lists each one with its parameters, status, count and time.
 
@@ -86,7 +86,7 @@ A real run on 2026-10-03 (no personal data; the key is not shown anywhere).
 - Food and activity tastes pick places but don't shape Qloo's heatmap; with only those, neighborhoods are ranked by matching places, which is thinner evidence.
 - A word that isn't an exact Qloo name is only used if it resembles what was typed (allowing a typo or two); anything else is reported as not found, because Qloo's semantic search returns something for any text.
 - Neighborhood names are Qloo's (from its place data), with OpenStreetMap where Qloo has none; they may differ from local usage, and Qloo sometimes uses a district name ("Near North Side") next to the neighborhoods inside it.
-- The area squares, their ranking, the left-out place types and the weekend picks are Newcomer's rules on top of Qloo's numbers; the page labels them.
+- The area squares, their ranking (including the small boost for your kinds of places), the left-out place types and the weekend picks are Newcomer's rules on top of Qloo's numbers; the page labels them.
 - Results are cached for a day per identical query to respect the event quota. A result where an optional step failed is shown but not cached.
 - Each address can run 20 searches an hour, to protect the shared quota.
 
@@ -97,7 +97,7 @@ You need Node.js 22 or newer and a free Cloudflare account (Workers, KV and Work
 ```bash
 git clone https://github.com/danielhagever/newcomer && cd newcomer
 npm install
-npm test                                          # 46 tests against a mock Qloo shaped like the live API, no key needed
+npm test                                          # 47 tests against a mock Qloo shaped like the live API, no key needed
 npx wrangler login
 npx wrangler kv namespace create newcomer-cache   # put the id in wrangler.jsonc
 npx wrangler secret put QLOO_API_KEY             # your hackathon key, server-side only
