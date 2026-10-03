@@ -70,7 +70,7 @@ test("a result is cached for a day; a degraded one is not", async () => {
   try {
     const { kv, store } = memoryKV();
     await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "Phoebe Bridgers", kind: "artist" }] }), env(kv));
-    assert.equal([...store.keys()].filter((k) => k.startsWith("match8:")).length, 1);
+    assert.equal([...store.keys()].filter((k) => k.startsWith("match10:")).length, 1);
   } finally {
     m.restore();
   }
@@ -79,7 +79,7 @@ test("a result is cached for a day; a degraded one is not", async () => {
     const { kv, store } = memoryKV();
     const r = await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "Phoebe Bridgers", kind: "artist" }] }), env(kv));
     assert.equal(r.status, 200);
-    assert.equal([...store.keys()].filter((k) => k.startsWith("match8:")).length, 0);
+    assert.equal([...store.keys()].filter((k) => k.startsWith("match10:")).length, 0);
   } finally {
     broken.restore();
   }
@@ -145,4 +145,33 @@ test("Qloo's own 400 message reaches the person", async () => {
   } finally {
     m.restore();
   }
+});
+
+test("past 8 interests, the extras are named as left out; a repeat search says it is a saved result", async () => {
+  const m = mockFetch(qlooOk);
+  try {
+    const { kv } = memoryKV();
+    const names = Array.from({ length: 10 }, (_, i) => ({ name: `Phoebe Bridgers ${i}`, kind: "artist" }));
+    const first = await (await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: names }), env(kv))).json();
+    assert.equal(first.interests.length, 8);
+    assert.deepEqual(first.leftOut, ["Phoebe Bridgers 8", "Phoebe Bridgers 9"]);
+    assert.equal(first.cached, undefined);
+    const again = await (await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: names }), env(kv))).json();
+    assert.equal(again.cached, true);
+    assert.equal(again.computedAt, first.computedAt);
+  } finally {
+    m.restore();
+  }
+});
+
+test("the page labels a saved result, marks interests past 8, and asks for no personal details", () => {
+  assert.match(page, /d\.cached \?/);
+  assert.match(page, /not used \(up to 8\)/);
+  assert.match(page, /No personal details/);
+});
+
+test("a name written in another language keeps its English lookup name (en), and an English one doesn't repeat it", () => {
+  const c = cleanInterests([{ name: "פאודה", en: "Fauda", kind: "tv_show" }, { name: "ramen", en: "Ramen", kind: "tag" }]);
+  assert.deepEqual(c[0], { name: "פאודה", query: "Fauda", kind: "tv_show" });
+  assert.deepEqual(c[1], { name: "ramen", kind: "tag" });
 });

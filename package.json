@@ -1,6 +1,6 @@
 {
   "name": "newcomer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Newcomer: an agent that finds the neighborhood that already likes what you like, grounded in Qloo's taste graph.",

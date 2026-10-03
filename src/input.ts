@@ -2,7 +2,8 @@
 
 import { KINDS, validQlooId, type Interest, type Kind } from "./match.ts";
 
-export const MAX_INTERESTS = 8;
+export const MAX_INTERESTS = 8; // used in a search
+export const MAX_PARSED = 12; // read from the text, so the ones past 8 can be named as left out
 export const MAX_NAME = 60;
 export const MAX_CITY = 80;
 
@@ -14,7 +15,7 @@ export function cleanCity(v: unknown): string {
 
 // Keeps only well-formed interests: a non-empty name, a known kind (or none), and a Qloo ID only
 // if it looks like one.
-export function cleanInterests(v: unknown): Interest[] {
+export function cleanInterests(v: unknown, max = MAX_INTERESTS): Interest[] {
   if (!Array.isArray(v)) return [];
   const out: Interest[] = [];
   for (const raw of v) {
@@ -24,8 +25,14 @@ export function cleanInterests(v: unknown): Interest[] {
     const kind = KINDS.includes((raw as any).kind) ? ((raw as any).kind as Kind) : undefined;
     const id = clean((raw as any).id, 80);
     const as = clean((raw as any).as, 120);
-    out.push({ name, ...(kind ? { kind } : {}), ...(id && validQlooId(id) ? { id, ...(as ? { as } : {}) } : {}) });
-    if (out.length === MAX_INTERESTS) break;
+    const query = clean((raw as any).query ?? (raw as any).en, MAX_NAME);
+    out.push({
+      name,
+      ...(query && query.toLowerCase() !== name.toLowerCase() ? { query } : {}),
+      ...(kind ? { kind } : {}),
+      ...(id && validQlooId(id) ? { id, ...(as ? { as } : {}) } : {}),
+    });
+    if (out.length === max) break;
   }
   return out;
 }
@@ -38,11 +45,11 @@ export function fallbackInterests(text: string): Interest[] {
     .split(/[,;\n]+/)
     .map((s) => s.replace(/^\s*(i (really )?(love|like|enjoy)|into|and)\s+/i, "").trim())
     .filter((s) => s.length > 1)
-    .slice(0, MAX_INTERESTS)
+    .slice(0, MAX_PARSED)
     .map((s) => ({ name: s.slice(0, MAX_NAME) }));
 }
 
-const SYSTEM = `Extract the person's interests as JSON: {"interests":[{"name":"...","kind":"..."}]}. kind is one of ${KINDS.join(", ")}. Use "tag" for cuisines, activities, styles and genres (e.g. ramen, bouldering, jazz, vintage clothing). Use the exact proper name for artists, films, shows, books, podcasts, games and brands. A capitalized name that is the title of a show, film, book, band or game is that title, not a tag (for example "Dark" is the TV series and "Heat" is the film); use "tag" only for common words like cuisines, activities and genres. At most ${MAX_INTERESTS} interests. Output JSON only.`;
+const SYSTEM = `Extract the person's interests as JSON: {"interests":[{"name":"...","en":"...","kind":"..."}]}. "name" is exactly as the person wrote it, in their language and script (never transliterated). "en" is its English name as used internationally: the official English title of a show, film, book or game, the usual Latin spelling of an artist, the English word for a food or activity; when the name is already English, "en" repeats it. kind is one of ${KINDS.join(", ")}. Use "tag" for cuisines, activities, styles and genres (e.g. ramen, bouldering, jazz, vintage clothing). Use the exact proper name for artists, films, shows, books, podcasts, games and brands. A capitalized name that is the title of a show, film, book, band or game is that title, not a tag (for example "Dark" is the TV series and "Heat" is the film); use "tag" only for common words like cuisines, activities and genres. Keep the person's order. At most ${MAX_PARSED} interests. Output JSON only.`;
 
 // "I love Phoebe Bridgers, The Bear, ramen and bouldering" -> typed interests (Workers AI).
 export async function parseInterests(ai: Ai, text: string): Promise<Interest[]> {
@@ -59,8 +66,8 @@ export async function parseInterests(ai: Ai, text: string): Promise<Interest[]> 
     // Some models return the JSON already parsed.
     const raw = typeof rawVal === "string" ? rawVal : JSON.stringify(rawVal);
     const m = raw.match(/\{[\s\S]*\}/);
-    const list = cleanInterests(m ? JSON.parse(m[0])?.interests : []);
-    if (list.length) return list.map(({ name, kind }) => ({ name, kind: kind ?? "tag" }));
+    const list = cleanInterests(m ? JSON.parse(m[0])?.interests : [], MAX_PARSED);
+    if (list.length) return list.map(({ name, query, kind }) => ({ name, ...(query ? { query } : {}), kind: kind ?? "tag" }));
   } catch {
     // Fall through to the plain split.
   }

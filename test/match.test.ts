@@ -565,3 +565,57 @@ test("your kinds of places within reach lift an area (0.03 each, up to three)", 
     m.restore();
   }
 });
+
+test("a city named like its state keeps the state, so Qloo reads the city, not the state", async () => {
+  const m = mockFetch((c) => (c.host === "geocoding-api.open-meteo.com" ? { body: { results: [{ id: 5128581, name: "New York", latitude: 40.71, longitude: -74.0, country_code: "US", admin1: "New York", country: "United States", population: 8804190 }] } } : undefined));
+  try {
+    const { kv } = memoryKV();
+    const c = await cityCenter(kv, new Budget(10), "NYC");
+    assert.equal(c!.query, "New York, New York");
+  } finally {
+    m.restore();
+  }
+});
+
+test("a city typed in Hebrew is found in Hebrew and asked about in English", async () => {
+  const m = mockFetch((c) => {
+    if (c.host !== "geocoding-api.open-meteo.com") return undefined;
+    if (c.path === "/v1/get") return { body: { id: 293397, name: "Tel Aviv", latitude: 32.08, longitude: 34.78, country_code: "IL", admin1: "Tel Aviv", country: "Israel" } };
+    if (c.params.get("language") === "he") return { body: { results: [{ id: 293397, name: "תל אביב-יפו", latitude: 32.08, longitude: 34.78, country_code: "IL", country: "ישראל", population: 432892 }] } };
+    return { body: {} };
+  });
+  try {
+    const { kv } = memoryKV();
+    const c = await cityCenter(kv, new Budget(10), "תל אביב");
+    assert.equal(c!.query, "Tel Aviv, Israel");
+  } finally {
+    m.restore();
+  }
+});
+
+test("neighborhoods carry the score they are ordered by (percentile plus the boost)", async () => {
+  const m = mockFetch(standardQloo());
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
+    for (let i = 1; i < r.neighborhoods.length; i++) assert.ok(r.neighborhoods[i - 1].score >= r.neighborhoods[i].score);
+    assert.ok(r.neighborhoods.every((h) => h.score >= h.affinity));
+    assert.ok(r.computedAt > 0);
+  } finally {
+    m.restore();
+  }
+});
+
+test("Qloo is searched with the English name; the person sees what they wrote", async () => {
+  const m = mockFetch(standardQloo());
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "פיבי ברידג'רס", query: "Phoebe Bridgers", kind: "artist" }]);
+    assert.equal(m.calls.find((c) => c.path === "/search")!.params.get("query"), "Phoebe Bridgers");
+    assert.equal(r.resolved[0].input, "פיבי ברידג'רס");
+    assert.equal(r.resolved[0].query, "Phoebe Bridgers");
+    assert.equal(r.resolved[0].match, "exact");
+  } finally {
+    m.restore();
+  }
+});

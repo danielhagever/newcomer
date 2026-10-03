@@ -16,7 +16,8 @@ export type Kind = "artist" | "movie" | "tv_show" | "book" | "podcast" | "video_
 export const KINDS: Kind[] = ["artist", "movie", "tv_show", "book", "podcast", "video_game", "brand", "place", "tag"];
 
 export interface Interest {
-  name: string;
+  name: string; // as the person wrote it (shown back to them)
+  query?: string; // the English name to look up in Qloo, when what was written isn't English ("פאודה" -> "Fauda")
   kind?: Kind;
   id?: string; // a Qloo entity or tag ID the person picked from the alternatives of an earlier result
   as?: string; // that ID's name, for display
@@ -30,6 +31,7 @@ export interface Choice {
 
 export interface Resolved {
   input: string; // what the person wrote
+  query?: string; // the English name it was looked up by, when different
   as: string; // the Qloo name it matched (with a year or similar when Qloo has several)
   id: string;
   type: string;
@@ -48,6 +50,7 @@ export interface Neighborhood {
   lat: number;
   lon: number;
   affinity: number; // map mode: mean percentile of its cells in the city (0 to 1); places mode: share of the matching places
+  score: number; // what the order is by: affinity plus Newcomer's boost for your kinds of places nearby
   cells: number; // map mode: map cells; places mode: matching places
   evidence: Entity[]; // places here that Qloo ranks highly for the same tastes
   matches: Entity[]; // places here that ARE one of your food or activity tastes
@@ -67,6 +70,7 @@ export interface MatchResult {
   degraded: boolean; // something optional failed (names, evidence): shown, but not cached
   trace: { step: string; detail: string }[];
   calls: { path: string; params: Record<string, string>; status: number; ms: number; count: number }[];
+  computedAt: number; // when Qloo was asked (a cached result keeps its time)
 }
 
 const ENTITY_TYPES: Record<string, string> = {
@@ -130,10 +134,12 @@ const TYPE_WORD: Record<string, string> = {
 };
 const choice = (e: Entity): Choice => ({ id: e.id, name: label(e), type: TYPE_WORD[e.types[0] ?? ""] ?? "entity" });
 
+const term = (it: Interest) => it.query ?? it.name;
+
 async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Resolved | null> {
-  const found = await q.search(it.name, type, 5);
-  const exact = found.filter((e) => normalizeName(e.name) === normalizeName(it.name));
-  const list = found.filter((e) => exact.includes(e) || resembles(it.name, e.name));
+  const found = await q.search(term(it), type, 5);
+  const exact = found.filter((e) => normalizeName(e.name) === normalizeName(term(it)));
+  const list = found.filter((e) => exact.includes(e) || resembles(term(it), e.name));
   if (!list.length) return null;
   const pick = exact[0] ?? list[0];
   const match: Resolved["match"] = exact.length === 1 ? "exact" : exact.length > 1 ? "ambiguous" : "closest";
@@ -141,11 +147,12 @@ async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Reso
   // The kind was the model's guess ("Dune" as a book): when the match is uncertain, offer the same
   // name in every kind too, so the person can pick the film.
   if (match !== "exact" && type) {
-    const anyKind = (await q.search(it.name, undefined, 5).catch(() => [])).filter((e) => e.id !== pick.id && resembles(it.name, e.name) && !others.some((o) => o.id === e.id));
+    const anyKind = (await q.search(term(it), undefined, 5).catch(() => [])).filter((e) => e.id !== pick.id && resembles(term(it), e.name) && !others.some((o) => o.id === e.id));
     others = [...others.slice(0, 2), ...anyKind.slice(0, 3), ...others.slice(2)];
   }
   return {
     input: it.name,
+    ...(it.query ? { query: it.query } : {}),
     as: label(pick),
     id: pick.id,
     type: pick.types[0] ?? type ?? "entity",
@@ -160,9 +167,9 @@ async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Reso
 // A taste (ramen, bouldering, jazz) can have a map variant (a genre) and a place variant (a cuisine,
 // an activity): Qloo lists the same name in many families, each with the entity types it applies to.
 async function resolveTag(q: Qloo, it: Interest): Promise<Resolved | null> {
-  const list = (await q.tags(it.name, 20)).filter((t) => resembles(it.name, t.name));
+  const list = (await q.tags(term(it), 20)).filter((t) => resembles(term(it), t.name));
   if (!list.length) return null;
-  const exact = list.filter((t) => normalizeName(t.name) === normalizeName(it.name));
+  const exact = list.filter((t) => normalizeName(t.name) === normalizeName(term(it)));
   const pool = exact.length ? exact : list;
   const forPlaces = pool.find(placeTag);
   // Yoga and skateboarding are also music genres; when the word means an activity or a food, its
@@ -187,6 +194,7 @@ async function resolveTag(q: Qloo, it: Interest): Promise<Resolved | null> {
   if (forPlaces) use.push("places");
   return {
     input: it.name,
+    ...(it.query ? { query: it.query } : {}),
     as: pick.name,
     id: pick.id,
     type: pick.type ?? "tag",
@@ -239,7 +247,7 @@ export async function matchNeighborhoods(
   const seen = new Set<string>();
   const interests = interestsIn
     .filter((i) => {
-      const k = i.id ?? normalizeName(i.name);
+      const k = i.id ?? normalizeName(term(i));
       if (seen.has(k)) return false;
       seen.add(k);
       return true;
@@ -327,7 +335,8 @@ export async function matchNeighborhoods(
     const reach = Math.max(1.2, areaKm(heat.points) * 0.75);
     const nearby = new Map(candidates.map((h) => [h, cityMatches.filter((p) => km(h, { lat: p.lat!, lon: p.lon! }) <= reach).length]));
     const boosted = (h: Neighborhood) => h.affinity + 0.03 * Math.min(nearby.get(h) ?? 0, 3);
-    hoods = [...candidates].sort((a, b) => boosted(b) - boosted(a)).slice(0, 7);
+    for (const h of candidates) h.score = boosted(h);
+    hoods = [...candidates].sort((a, b) => b.score - a.score).slice(0, 7);
     trace.push({
       step: "Areas",
       detail:
@@ -426,6 +435,7 @@ export async function matchNeighborhoods(
     degraded,
     trace,
     calls: q.calls,
+    computedAt: Date.now(),
   };
 }
 
@@ -438,7 +448,7 @@ function medianKm(ps: { lat: number; lon: number }[], c: { lat: number; lon: num
 }
 
 function emptyHood(lat: number, lon: number, affinity: number, cells: number): Neighborhood {
-  return { name: "", lat, lon, affinity, cells, evidence: [], matches: [] };
+  return { name: "", lat, lon, affinity, score: affinity, cells, evidence: [], matches: [] };
 }
 
 // Qloo's cells are geohash-7 (~150 m) in a city and geohash-6 (~1.2 x 0.6 km) over a big county.

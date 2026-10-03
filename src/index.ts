@@ -2,7 +2,7 @@ import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { matchNeighborhoods, weekendStop, KINDS, type Interest, type Kind, type MatchResult } from "./match.ts";
 import { AppError, Budget, REQUEST_BUDGET, allow } from "./limits.ts";
-import { MAX_CITY, MAX_INTERESTS, MAX_NAME, cleanCity, cleanInterests, parseInterests } from "./input.ts";
+import { MAX_CITY, MAX_INTERESTS, MAX_NAME, MAX_PARSED, cleanCity, cleanInterests, parseInterests } from "./input.ts";
 
 export interface Env {
   QLOO_API_KEY?: string;
@@ -12,7 +12,7 @@ export interface Env {
   ASSETS: Fetcher;
 }
 
-// Per address, per hour. A search is 5 to 22 Qloo calls; parsing is one Workers AI call.
+// Per address, per hour. A search is 3 to 20 Qloo calls (measured); parsing is one Workers AI call.
 const LIMITS = { parse: 30, match: 20, mcp: 20 };
 
 const json = (d: unknown, status = 200) =>
@@ -25,14 +25,16 @@ const failure = (e: unknown) => {
 };
 
 // Bump whenever the pipeline or the result format changes, so no one gets yesterday's logic.
-const CACHE_VERSION = 8;
+const CACHE_VERSION = 10;
 
-async function cachedMatch(env: Env, budget: Budget, city: string, interests: Interest[]): Promise<MatchResult> {
-  const key = `match${CACHE_VERSION}:` + (await sha(JSON.stringify([city.toLowerCase(), interests.map((i) => [i.name.toLowerCase(), i.kind ?? "", i.id ?? ""])])));
+// Returns the result and whether it came from the day's cache (the page says so: the timings in
+// "How we know" are from the run that made it).
+async function cachedMatch(env: Env, budget: Budget, city: string, interests: Interest[]): Promise<MatchResult & { cached?: boolean }> {
+  const key = `match${CACHE_VERSION}:` + (await sha(JSON.stringify([city.toLowerCase(), interests.map((i) => [i.name.toLowerCase(), i.query?.toLowerCase() ?? "", i.kind ?? "", i.id ?? ""])])));
   if (budget.take()) {
     try {
       const hit = await env.CACHE.get(key, "json");
-      if (hit) return hit as MatchResult;
+      if (hit) return { ...(hit as MatchResult), cached: true };
     } catch {
       // A cache miss is fine.
     }
@@ -139,17 +141,20 @@ export default {
       const body = (await req.json().catch(() => null)) as { city?: unknown; text?: unknown; interests?: unknown } | null;
       const city = cleanCity(body?.city);
       const text = typeof body?.text === "string" ? body.text.trim() : "";
-      let interests = cleanInterests(body?.interests);
-      if (city.length < 2 || (!interests.length && !text)) return json({ error: "Please give a city and at least one thing you love." }, 400);
+      let all = cleanInterests(body?.interests, MAX_PARSED);
+      if (city.length < 2 || (!all.length && !text)) return json({ error: "Please give a city and at least one thing you love." }, 400);
       const budget = new Budget(REQUEST_BUDGET);
       if (!(await allow(req, "match", LIMITS.match, budget))) return json({ error: "Too many searches from this address in the last hour. Please try again later." }, 429);
       try {
-        if (!interests.length) {
+        if (!all.length) {
           budget.take(); // the Workers AI call may count as a subrequest too
-          interests = await parseInterests(env.AI, text);
+          all = await parseInterests(env.AI, text);
         }
+        // A search uses the first 8; the rest are named, not silently dropped.
+        const interests = all.slice(0, MAX_INTERESTS);
+        const leftOut = all.slice(MAX_INTERESTS).map((i) => i.name);
         const r = await cachedMatch(env, budget, city, interests);
-        return json({ ...r, summary: summary(r), interests });
+        return json({ ...r, summary: summary(r), interests, leftOut });
       } catch (e) {
         const f = failure(e);
         return json({ error: f.message }, f.status);

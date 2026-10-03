@@ -80,7 +80,8 @@
       <div class="row">
         <div><label for="city">Moving to</label><input id="city" value="Austin, Texas" autocomplete="off" maxlength="80"></div>
         <div><label for="text">What do you love?</label>
-          <textarea id="text" maxlength="600">Phoebe Bridgers, The Bear, ramen, bouldering, natural wine</textarea>
+          <textarea id="text" maxlength="600" aria-describedby="textHint">Phoebe Bridgers, The Bear, ramen, bouldering, natural wine</textarea>
+          <div class="m" id="textHint" style="margin-top:6px">Artists, shows, films, foods, activities, up to 8. No personal details, please: the names are looked up in Qloo.</div>
           <div class="chips" id="chips">
             <button type="button" class="chip" data-city="Chicago, Illinois" data-text="Taylor Swift, Gilmore Girls, brunch, yoga, farmers markets">Chicago: Taylor Swift, Gilmore Girls, brunch</button>
             <button type="button" class="chip" data-city="Los Angeles, California" data-text="Kendrick Lamar, Dune: Part Two, tacos, skateboarding, vinyl records">LA: Kendrick Lamar, Dune, tacos</button>
@@ -91,7 +92,7 @@
       <button class="go" id="go">Find my neighborhood</button>
     </div>
     <div class="card" id="progress" hidden>
-      <h2>Working on it</h2>
+      <h2 id="progressTitle">Working on it</h2>
       <div id="understood" style="margin-bottom:8px"></div>
       <ul class="steps" id="steps" aria-live="polite"></ul>
     </div>
@@ -115,6 +116,7 @@ const KIND = { artist: "artist", movie: "film", tv_show: "TV show", book: "book"
 function progress(step) {
   const steps = ["Understanding your taste", "Asking Qloo where people who share it concentrate, naming the neighborhoods and finding the places that prove it (usually under 15 seconds)"];
   $("progress").hidden = false;
+  $("progressTitle").textContent = step >= steps.length ? "Done" : "Working on it";
   $("steps").innerHTML = steps.map((s, j) => `<li class="${j < step ? "done" : j === step ? "now" : ""}">${s}</li>`).join("");
 }
 
@@ -144,7 +146,7 @@ $("go").onclick = async () => {
     } catch {
       // The server parses the text itself if this step failed.
     }
-    $("understood").innerHTML = interests.map((i) => `<span class="tag">${esc(i.name)} · ${esc(KIND[i.kind] || "interest")}</span>`).join("");
+    $("understood").innerHTML = interests.map((i, n) => `<span class="tag"${n >= 8 ? ' style="opacity:.55" title="Only the first 8 are used"' : ""}>${esc(i.name)}${i.query ? ` (${esc(i.query)})` : ""} · ${esc(n >= 8 ? "not used" : KIND[i.kind] || "interest")}</span>`).join("");
     progress(1);
     await search({ city, text, interests });
   } catch {
@@ -159,12 +161,15 @@ function pickList(d) {
     const choose = (r.match === "closest" || r.match === "ambiguous") && r.alternatives.length
       ? `<label class="m" for="alt${i}">Not it?</label><select id="alt${i}" data-i="${i}"><option value="">${esc(r.as)}</option>${r.alternatives.map((a) => `<option value="${esc(a.id)}" data-name="${esc(a.name)}">${esc(a.name)}${a.type && a.type !== "tag" && !a.type.startsWith("urn:") ? ` · ${esc(a.type)}` : ""}</option>`).join("")}</select>`
       : "";
-    return `<div class="pick"><span>${esc(r.input)} → <b>${esc(r.as)}</b>${where}</span>${badge}${choose}</div>`;
+    return `<div class="pick"><span>${esc(r.input)}${r.query ? ` (${esc(r.query)})` : ""} → <b>${esc(r.as)}</b>${where}</span>${badge}${choose}</div>`;
   }).join("");
 }
 
 function render(d) {
-  const max = Math.max(...d.neighborhoods.map((h) => h.affinity), 0.0001);
+  // Bars and circles follow the order (h.score: Qloo's percentile plus Newcomer's boost for your
+  // kinds of places nearby); the text gives Qloo's own number.
+  const max = Math.max(...d.neighborhoods.map((h) => h.score ?? h.affinity), 0.0001);
+  const sc = (h) => h.score ?? h.affinity;
   // Map mode: affinity is the mean percentile of the area's cells within the city.
   const score = (h) => d.mode === "map"
     ? `Map cells here average in the top ${Math.max(1, Math.round((1 - h.affinity) * 100))}% of ${esc(d.city)} for this taste (Qloo affinity ${h.affinity.toFixed(2)}, ${h.cells} cells)${h.matches.length ? `; ${h.matches.length} of your kinds of places here` : ""}`
@@ -173,7 +178,7 @@ function render(d) {
   const hoods = d.neighborhoods.map((h, i) => `
     <div class="hood" role="button" tabindex="0" aria-label="Show ${esc(h.name)} on the map" data-lat="${h.lat}" data-lon="${h.lon}">
       <h3><span class="rank">#${i + 1}</span>${esc(h.name)}</h3>
-      <div class="bar" title="Relative to the best match"><i style="width:${Math.round((h.affinity / max) * 100)}%"></i></div>
+      <div class="bar" title="Ranking score relative to the best match: Qloo's percentile plus your kinds of places nearby"><i style="width:${Math.round((sc(h) / max) * 100)}%"></i></div>
       <div class="m">${score(h)}</div>
       ${h.matches.length ? `<div class="m" style="margin-top:10px"><b>Your kind of places here</b></div>${h.matches.map(place).join("")}` : ""}
       ${h.evidence.length ? `<div class="m" style="margin-top:10px"><b>Places people with your taste rate highly</b></div>${h.evidence.map(place).join("")}` : ""}
@@ -183,13 +188,14 @@ function render(d) {
   $("results").innerHTML = `
     <div class="card"><p class="summary">${esc(d.summary)}</p>
       ${d.qlooCity ? `<div class="m" style="margin-bottom:8px">Qloo read the city as ${esc(d.qlooCity)}.</div>` : ""}
-      <div class="m" style="margin-bottom:4px">Matched in Qloo${d.unresolved.length ? ` · not found: ${esc(d.unresolved.join(", "))}` : ""}</div>
+      <div class="m" style="margin-bottom:4px">Matched in Qloo${d.unresolved.length ? ` · not found: ${esc(d.unresolved.join(", "))}` : ""}${d.leftOut && d.leftOut.length ? ` · not used (up to 8): ${esc(d.leftOut.join(", "))}` : ""}</div>
       <div id="picks">${pickList(d)}</div>
       ${d.resolved.some((r) => (r.match === "closest" || r.match === "ambiguous") && r.alternatives.length) ? `<button class="redo" id="redo" disabled>Update results with my choices</button>` : ""}
       ${d.degraded ? `<p class="m" style="margin:10px 0 0">Some optional steps didn't finish (a place lookup or a neighborhood name). This result isn't saved; try again later for a complete one.</p>` : ""}</div>
     <div class="card"><h2>Neighborhoods, ranked by taste</h2>${hoods}</div>
     <div class="card"><h2>Your scouting weekend</h2>${weekend || '<span class="m">Qloo didn\'t return enough places near the top neighborhoods to plan a weekend.</span>'}</div>
     <div class="card"><h2>How we know</h2>
+      ${d.cached ? `<p class="m" style="margin:0 0 8px">This is a saved result from ${esc(new Date(d.computedAt).toLocaleString())}: identical searches are kept for a day to spare the shared Qloo quota, and the calls below are from that run.</p>` : ""}
       <ol class="m" style="margin:0 0 10px 18px;padding:0">${d.trace.map((t) => `<li><b>${esc(t.step)}:</b> ${esc(t.detail)}</li>`).join("")}</ol>
       <div class="callsWrap"><table class="calls"><tr><th>Qloo call</th><th>Parameters (key never leaves the server)</th><th>Status</th><th>Results</th><th>Time</th></tr>${calls}</table></div>
       <p class="m" style="margin:12px 0 2px"><b>Newcomer's own rules</b> (not Qloo results):</p>
@@ -202,7 +208,7 @@ function render(d) {
   d.neighborhoods.forEach((h, i) => {
     pts.push([h.lat, h.lon]);
     // Leaflet renders tooltip strings as HTML: names from Qloo and OpenStreetMap are escaped.
-    L.circle([h.lat, h.lon], { radius: 500 + 900 * (h.affinity / max), color: "#0f766e", weight: 2, fillOpacity: 0.18 }).bindTooltip(`#${i + 1} ${esc(h.name)}`, { permanent: i < 3, direction: "top" }).addTo(layer);
+    L.circle([h.lat, h.lon], { radius: 500 + 900 * (sc(h) / max), color: "#0f766e", weight: 2, fillOpacity: 0.18 }).bindTooltip(`#${i + 1} ${esc(h.name)}`, { permanent: i < 3, direction: "top" }).addTo(layer);
     [...h.matches, ...h.evidence].forEach((e) => { if (e.lat && e.lon) { pts.push([e.lat, e.lon]); L.circleMarker([e.lat, e.lon], { radius: 5, color: "#e07a2f", fillOpacity: 0.9 }).bindTooltip(esc(e.name)).addTo(layer); } });
   });
   if (pts.length) map.fitBounds(pts, { padding: [30, 30], maxZoom: 13 });
@@ -224,9 +230,10 @@ function wireChoices(d) {
       const s = document.querySelector(`#picks select[data-i="${i}"]`);
       const opt = s && s.value ? s.selectedOptions[0] : null;
       // Only a changed item is pinned to an ID; the rest are looked up again by name, as before.
-      if (opt) return { name: r.input, ...(r.kind ? { kind: r.kind } : {}), id: s.value, as: opt.dataset.name };
-      if (r.match === "chosen") return { name: r.input, ...(r.kind ? { kind: r.kind } : {}), id: r.id, as: r.as };
-      return { name: r.input, ...(r.kind ? { kind: r.kind } : {}) };
+      const base = { name: r.input, ...(r.query ? { query: r.query } : {}), ...(r.kind ? { kind: r.kind } : {}) };
+      if (opt) return { ...base, id: s.value, as: opt.dataset.name };
+      if (r.match === "chosen") return { ...base, id: r.id, as: r.as };
+      return base;
     }).concat(d.unresolved.map((name) => ({ name })));
     redo.disabled = true; $("go").disabled = true; progress(1);
     try { await search({ city: $("city").value, interests }); } catch { $("results").innerHTML = `<div class="card">Something went wrong. Please try again.</div>`; }
