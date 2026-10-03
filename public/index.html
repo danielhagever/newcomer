@@ -157,7 +157,7 @@ function pickList(d) {
     const badge = r.match === "closest" ? ` <span class="badge">closest match</span>` : r.match === "ambiguous" ? ` <span class="badge">several share this name</span>` : r.match === "chosen" ? ` <span class="badge" style="background:var(--soft);color:var(--accent)">your choice</span>` : "";
     const where = r.use && !r.use.includes("map") ? ` <span class="m">· picks the places</span>` : "";
     const choose = (r.match === "closest" || r.match === "ambiguous") && r.alternatives.length
-      ? `<label class="m" for="alt${i}">Not it?</label><select id="alt${i}" data-i="${i}"><option value="">${esc(r.as)}</option>${r.alternatives.map((a) => `<option value="${esc(a.id)}" data-name="${esc(a.name)}">${esc(a.name)}</option>`).join("")}</select>`
+      ? `<label class="m" for="alt${i}">Not it?</label><select id="alt${i}" data-i="${i}"><option value="">${esc(r.as)}</option>${r.alternatives.map((a) => `<option value="${esc(a.id)}" data-name="${esc(a.name)}">${esc(a.name)}${a.type && a.type !== "tag" && !a.type.startsWith("urn:") ? ` · ${esc(a.type)}` : ""}</option>`).join("")}</select>`
       : "";
     return `<div class="pick"><span>${esc(r.input)} → <b>${esc(r.as)}</b>${where}</span>${badge}${choose}</div>`;
   }).join("");

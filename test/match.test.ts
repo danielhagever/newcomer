@@ -67,6 +67,7 @@ test("an exact Qloo name wins; two things with the same name are 'ambiguous' and
     assert.equal(dune.match, "ambiguous");
     assert.equal(dune.as, "Dune (2021)");
     assert.deepEqual(dune.alternatives.map((a) => a.name), ["Dune (1984)", "Dune: Part Two (2024)"]);
+    assert.ok(dune.alternatives.every((a) => a.type === "film"));
     const pb = r.resolved.find((x) => x.input === "Phoebe Bridgers")!;
     assert.equal(pb.match, "exact");
     assert.equal(pb.as, "Phoebe Bridgers", "a disambiguation equal to the name isn't repeated");
@@ -502,4 +503,23 @@ test("two branches of one chain aren't two stops on the same day", () => {
     { id: "3", name: "Night Bar", types: [], tags: ["Bar"], times: ["Evening"] },
   ];
   assert.deepEqual(planDay(ps).map((s) => s.place), ["Cocoro", "Night Bar"]);
+});
+
+test("when the guessed kind is uncertain, the same name in other kinds is offered (Dune the book -> the film)", async () => {
+  const m = mockFetch((c) => {
+    if (qloo(c) && c.path === "/search" && c.params.get("types") === "urn:entity:book")
+      return { body: { results: [{ entity_id: UUID(21), name: "Dune (Dune, #1)", disambiguation: "1965, Frank Herbert", types: ["urn:entity:book"] }, { entity_id: UUID(22), name: "Dune Messiah", types: ["urn:entity:book"] }] } };
+    if (qloo(c) && c.path === "/search" && !c.params.get("types"))
+      return { body: { results: [{ entity_id: UUID(1), name: "Dune", disambiguation: "2021", types: ["urn:entity:movie"] }, { entity_id: UUID(21), name: "Dune (Dune, #1)", types: ["urn:entity:book"] }] } };
+    return standardQloo()(c);
+  });
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Dune", kind: "book" }]);
+    const d = r.resolved[0];
+    assert.equal(d.match, "closest");
+    assert.ok(d.alternatives.some((a) => a.name === "Dune (2021)" && a.type === "film"), JSON.stringify(d.alternatives));
+  } finally {
+    m.restore();
+  }
 });

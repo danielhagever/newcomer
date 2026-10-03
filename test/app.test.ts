@@ -70,7 +70,7 @@ test("a result is cached for a day; a degraded one is not", async () => {
   try {
     const { kv, store } = memoryKV();
     await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "Phoebe Bridgers", kind: "artist" }] }), env(kv));
-    assert.equal([...store.keys()].filter((k) => k.startsWith("match5:")).length, 1);
+    assert.equal([...store.keys()].filter((k) => k.startsWith("match6:")).length, 1);
   } finally {
     m.restore();
   }
@@ -79,7 +79,7 @@ test("a result is cached for a day; a degraded one is not", async () => {
     const { kv, store } = memoryKV();
     const r = await worker.fetch(post("/api/match", { city: "Austin, Texas", interests: [{ name: "Phoebe Bridgers", kind: "artist" }] }), env(kv));
     assert.equal(r.status, 200);
-    assert.equal([...store.keys()].filter((k) => k.startsWith("match5:")).length, 0);
+    assert.equal([...store.keys()].filter((k) => k.startsWith("match6:")).length, 0);
   } finally {
     broken.restore();
   }
@@ -113,7 +113,7 @@ test("MCP: a closest match tells the agent the alternatives and their IDs", asyn
     const data = JSON.parse(text.split("\n").find((l) => l.startsWith("data: "))!.slice(6));
     const said = data.result.content[0].text as string;
     assert.match(said, /closest Qloo match/);
-    assert.match(said, /Dune: Part Two \[id 00000000-0000-4000-8000-000000000003\]/);
+    assert.match(said, /Dune: Part Two \(\w[\w ]*\) \[id 00000000-0000-4000-8000-000000000003\]|Dune: Part Two \[id 00000000-0000-4000-8000-000000000003\]/);
   } finally {
     m.restore();
   }

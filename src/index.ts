@@ -25,7 +25,7 @@ const failure = (e: unknown) => {
 };
 
 // Bump whenever the pipeline or the result format changes, so no one gets yesterday's logic.
-const CACHE_VERSION = 5;
+const CACHE_VERSION = 6;
 
 async function cachedMatch(env: Env, budget: Budget, city: string, interests: Interest[]): Promise<MatchResult> {
   const key = `match${CACHE_VERSION}:` + (await sha(JSON.stringify([city.toLowerCase(), interests.map((i) => [i.name.toLowerCase(), i.kind ?? "", i.id ?? ""])])));
@@ -75,7 +75,7 @@ function caveats(r: MatchResult): string {
   const unsure = r.resolved.filter((x) => x.match === "closest" || x.match === "ambiguous");
   const parts = unsure.map(
     (x) =>
-      `"${x.input}" was matched to ${x.as} (${x.match === "closest" ? "closest Qloo match, not an exact name" : "several Qloo entries share this name; the first was used"})${x.alternatives.length ? `; alternatives: ${x.alternatives.map((a) => `${a.name} [id ${a.id}]`).join(", ")}` : ""}.`,
+      `"${x.input}" was matched to ${x.as} (${x.match === "closest" ? "closest Qloo match, not an exact name" : "several Qloo entries share this name; the first was used"})${x.alternatives.length ? `; alternatives: ${x.alternatives.map((a) => `${a.name}${a.type && !a.type.startsWith("urn:") ? ` (${a.type})` : ""} [id ${a.id}]`).join(", ")}` : ""}.`,
   );
   if (r.unresolved.length) parts.push(`Not found in Qloo: ${r.unresolved.join(", ")}.`);
   return parts.join(" ");

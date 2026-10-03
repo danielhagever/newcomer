@@ -124,23 +124,34 @@ const placeTag = (t: Tag) => t.parents.includes("urn:entity:place");
 // A tag picked by the person: cuisines, activities and the like filter places; genres go on the map.
 const placeFamily = (id: string) => /^urn:tag:(cuisine|activity_type|specialty_dish|setting|amenity|interests|category|genre:place)[:]/.test(id);
 
+const TYPE_WORD: Record<string, string> = {
+  "urn:entity:artist": "artist", "urn:entity:movie": "film", "urn:entity:tv_show": "TV show", "urn:entity:book": "book",
+  "urn:entity:podcast": "podcast", "urn:entity:video_game": "game", "urn:entity:brand": "brand", "urn:entity:place": "place",
+};
+const choice = (e: Entity): Choice => ({ id: e.id, name: label(e), type: TYPE_WORD[e.types[0] ?? ""] ?? "entity" });
+
 async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Resolved | null> {
   const found = await q.search(it.name, type, 5);
   const exact = found.filter((e) => normalizeName(e.name) === normalizeName(it.name));
   const list = found.filter((e) => exact.includes(e) || resembles(it.name, e.name));
   if (!list.length) return null;
   const pick = exact[0] ?? list[0];
+  const match: Resolved["match"] = exact.length === 1 ? "exact" : exact.length > 1 ? "ambiguous" : "closest";
+  let others = list.filter((e) => e.id !== pick.id);
+  // The kind was the model's guess ("Dune" as a book): when the match is uncertain, offer the same
+  // name in every kind too, so the person can pick the film.
+  if (match !== "exact" && type) {
+    const anyKind = (await q.search(it.name, undefined, 5).catch(() => [])).filter((e) => e.id !== pick.id && resembles(it.name, e.name) && !others.some((o) => o.id === e.id));
+    others = [...others.slice(0, 2), ...anyKind.slice(0, 3), ...others.slice(2)];
+  }
   return {
     input: it.name,
     as: label(pick),
     id: pick.id,
     type: pick.types[0] ?? type ?? "entity",
     signal: "entity",
-    match: exact.length === 1 ? "exact" : exact.length > 1 ? "ambiguous" : "closest",
-    alternatives: list
-      .filter((e) => e.id !== pick.id)
-      .slice(0, 4)
-      .map((e) => ({ id: e.id, name: label(e), type: e.types[0] ?? "entity" })),
+    match,
+    alternatives: others.slice(0, 5).map(choice),
     kind: it.kind,
     use: pick.types.includes("urn:entity:place") ? ["places"] : ["map"],
   };
