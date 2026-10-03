@@ -8,6 +8,8 @@ export const MAX_NAME = 60;
 export const MAX_CITY = 80;
 
 const clean = (v: unknown, max: number): string => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
+// "Björk" and "bjork" fold to the same letters.
+const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 
 export function cleanCity(v: unknown): string {
   return clean(v, MAX_CITY);
@@ -26,9 +28,12 @@ export function cleanInterests(v: unknown, max = MAX_INTERESTS): Interest[] {
     const id = clean((raw as any).id, 80);
     const as = clean((raw as any).as, 120);
     const query = clean((raw as any).query ?? (raw as any).en, MAX_NAME);
+    // The English name is used only when it is really another name ("פאודה" -> "Fauda", "senderismo"
+    // -> "hiking"). When it differs only by accents or case, what was typed is searched: Qloo's names
+    // keep their accents, and the model drops them ("Björk" -> "Bjork").
     out.push({
       name,
-      ...(query && query.toLowerCase() !== name.toLowerCase() ? { query } : {}),
+      ...(query && fold(query) !== fold(name) ? { query } : {}),
       ...(kind ? { kind } : {}),
       ...(id && validQlooId(id) ? { id, ...(as ? { as } : {}) } : {}),
     });

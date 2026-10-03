@@ -175,3 +175,14 @@ test("a name written in another language keeps its English lookup name (en), and
   assert.deepEqual(c[0], { name: "פאודה", query: "Fauda", kind: "tv_show" });
   assert.deepEqual(c[1], { name: "ramen", kind: "tag" });
 });
+
+test("an English name that only drops accents is not used: Qloo keeps the accents", () => {
+  const c = cleanInterests([
+    { name: "Björk", en: "Bjork", kind: "artist" },
+    { name: "Sigur Rós", en: "sigur ros" },
+    { name: "senderismo", en: "hiking", kind: "tag" },
+  ]);
+  assert.deepEqual(c[0], { name: "Björk", kind: "artist" });
+  assert.deepEqual(c[1], { name: "Sigur Rós" });
+  assert.deepEqual(c[2], { name: "senderismo", query: "hiking", kind: "tag" });
+});
