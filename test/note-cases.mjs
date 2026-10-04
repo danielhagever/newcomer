@@ -143,6 +143,17 @@ export const T = [
   ["Batman (The Dark Knight)", "movie", at("batman", "1989")], // policy: the exact name wins, The Dark Knight offered
   ["Better Call Saull (Breaking Bad)", "tv_show", only("Better Call Saul")],
   ["Fuller Hous (Full House)", "tv_show", only("Fuller House")],
+  // pass 10 (written before recording): "aka" notes, surname-only notes, a spin-off titled "Note: A Name Saga",
+  // sequel notes with Vol./Part
+  ["La Casa de Papel (aka Money Heist)", "tv_show", only("Money Heist")],
+  ["La Casa de Papel (a.k.a. Money Heist)", "tv_show", only("Money Heist")],
+  ["Ye (aka Kanye West)", "artist", only("Kanye West")], // "aka" says it's another name, so an act may take it
+  ["Amy (Winehouse documentary)", "movie", at("amy", "2015")],
+  ["Whitney (Houston documentary)", "movie", at("whitney", "2018")],
+  ["Mad Max (Furiosa)", "movie", (l) => /^furiosa/i.test(l)],
+  ["Guardians of the Galaxy (Guardians of the Galaxy Vol. 3)", "movie", (l) => /vol(\.|ume) 3/i.test(l)],
+  ["The Hunger Games (The Hunger Games: Mockingjay Part 1)", "movie", (l) => /mockingjay.*part 1\b/i.test(l)],
+  ["The Godfather (The Godfather Part II)", "movie", (l) => /godfather part ii( \(|$)/i.test(l)],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],
