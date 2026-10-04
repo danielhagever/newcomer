@@ -56,7 +56,7 @@ const NOTES: [string, any[], string][] = [
   ["Lord of the Rings (Return of the King)", [film("The Lord of the Rings: The Fellowship of the Ring", "2001"), film("The Lord of the Rings: The Return of the King", "2003")], "The Lord of the Rings: The Return of the King (2003) closest"],
   ["Dune (Part Two)", [film("Dune", "2021"), film("Dune: Part Two", "2024")], "Dune: Part Two (2024) exact"], // the same words as the name
   // The note is another name for it: used only when it is that name exactly.
-  ["Yasiin Bey (Mos Def)", [art("Mos Def")], "Mos Def closest"],
+  ["Yasiin Bey (Mos Def)", [art("Mos Def")], "none"], // never another name for an act (pass 5); live, the name alone finds Yasiin Bey
   ["La Casa de Papel (Money Heist)", [film("Money Heist", "2017,2021")], "Money Heist (2017,2021) closest"],
   ["Moonsprout (indie rock band)", [art("Indie Rock Allstars")], "none"],
   // Nothing before the note, or nothing like it: no guess.
@@ -76,7 +76,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 64 realistic inputs get the entry a reasonable person expects", async () => {
+test("notes in brackets on Qloo's live answers: 93 realistic inputs get the entry a reasonable person expects", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -88,12 +88,12 @@ test("notes in brackets on Qloo's live answers: 64 realistic inputs get the entr
     let r = rankNames(whole, input);
     searches++;
     if (withoutNote(input) !== input && (!r || r.searchName)) {
-      r = rankNames(together(whole, F[`${kind}|${withoutNote(input)}`]), input, true);
+      r = rankNames(together(whole, F[`${kind}|${withoutNote(input)}`]), input);
       searches++;
     }
     const got = r ? show(r.pick) : "none";
     if (!want(got)) wrong.push(`${input} -> ${got}`);
   }
   assert.deepEqual(wrong, []);
-  assert.ok(searches <= 78, `${searches} Qloo searches for 64 names`);
+  assert.ok(searches <= 120, `${searches} Qloo searches for 93 names`);
 });

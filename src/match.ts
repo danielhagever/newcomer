@@ -130,7 +130,7 @@ async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Reso
   // only while the request has calls to spare for the map and the area names (measured: 8 films with a note
   // used 41 of 44 and left 3 areas unnamed).
   if (withoutNote(term(it)) !== term(it) && (!ranked || ranked.searchName) && q.budget.left() > SPARE_FOR_NAMES)
-    ranked = rankNames(together(found, await q.search(withoutNote(term(it)), type, 5)), term(it), true);
+    ranked = rankNames(together(found, await q.search(withoutNote(term(it)), type, 5)), term(it));
   if (!ranked) return null;
   const { pick, match } = ranked;
   let others = ranked.list.filter((e) => e.id !== pick.id && ranked.offered(e));
