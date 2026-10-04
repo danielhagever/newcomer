@@ -86,19 +86,20 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 93 such inputs are recorded in test/note-fixtures.json):
-// - a title holding both the name and every word of the note that isn't already in the name or a kind word, as
-//   written or as a number twin or short form ("Pt. II", "Vol. 3"), in either order ("Star Wars (The Empire
-//   Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony Bourdain: Parts Unknown; "Batman
-//   (movie)" is not Batman: The Movie, "Interstellar (Nolan)" not Interstellar: Nolan's Odyssey). Not for acts: an
-//   act holding both names is a collaboration ("Mos Def (Yasiin Bey & Marvin Gaye)");
+// live answers for 112 such inputs are recorded in test/note-fixtures.json):
+// - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
+//   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
+//   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
+//   Bourdain: Parts Unknown; "Batman (movie)" is not Batman: The Movie, "Interstellar (Nolan)" not Interstellar:
+//   Nolan's Odyssey). Not for acts: an act holding both names is a collaboration ("Mos Def (Yasiin Bey & Marvin Gaye)");
+// - the note as the exact name of one title ("Indiana Jones (Raiders of the Lost Ark)", "Fast & Furious (Fast
+//   Five)", "La Casa de Papel (Money Heist)"), for a full name of two words or more that aren't kind words, and
+//   never for an act: an act's note is as often a hometown that is also a band's name ("Moonsprout (New England)"),
+//   so "Ye (Kanye West)" is not found rather than guessed;
 // - the name alone, among entries that don't hold the note's words; a year in the note picks among the near names
 //   holding the whole name, by Qloo's disambiguation ("Dune (2021 film)"; "The Lord of the Rings (2001)" is The
-//   Fellowship of the Ring; "Spider-Man (2002 film)" is not Spider (2002));
-//   "Dune (Part One)" is Dune, not Dune: Part Two;
-// - the note as another name ("La Casa de Papel (Money Heist)"), only when it is that name exactly, after the name
-//   alone was searched too, only for a full name (never kind words: "Wednesday (band)" is not The Band), and never
-//   for an act: an act's note is as often a hometown that is also a band's name ("Moonsprout (New England)").
+//   Fellowship of the Ring; "Spider-Man (2002 film)" is not Spider (2002)); "Dune (Part One)" is Dune, not Dune:
+//   Part Two; a note of kind words is set aside ("Wednesday (band)" is not The Band).
 // The note's words never make a match on their own ("Scream: The TV Series" for "Succession (TV series)", live),
 // and the pick is only a closest match, since what was typed wasn't a name. A whole text that is exactly a name
 // ("Birdman (or The Unexpected Virtue of Ignorance)") is that name.
@@ -115,8 +116,8 @@ export interface Ranked {
   offered: (e: Entity) => boolean; // close enough to offer under "Not it?"
   note?: "title" | "year" | "name" | "other name"; // how a note in brackets was read
   // Qloo is searched with the whole text first; the name alone is searched too when nothing matched, when the
-  // name matched only loosely ("The Godfather (Part I)" found only Part II and III), when the note's year wasn't
-  // among the entries ("Dune (2021 film)" found only the 1984 film), or before taking the note as another name.
+  // name matched only loosely ("The Godfather (Part I)" found only Part II and III), or when the note's year
+  // wasn't among the entries ("Dune (2021 film)" found only the 1984 film).
   searchName?: boolean;
 }
 
@@ -127,7 +128,8 @@ const KIND = new Set("band group rapper singer songwriter musician artist act dj
 const years = (s: string | undefined): string[] => s?.match(/\b\d{4}\b/g) ?? [];
 // In a title, a note's word must be there as written, or as its number twin ("2", "II", "Two") or short form.
 const SHORT: Record<string, string> = { pt: "part", vol: "volume", ep: "episode", ch: "chapter" };
-const sameWord = (a: string, b: string) => a === b || twins(a, b) || (SHORT[a] ?? a) === (SHORT[b] ?? b);
+const NUMBER = new Map("1 i one,2 ii two,3 iii three,4 iv four,5 v five,6 vi six,7 vii seven,8 viii eight,9 ix nine,10 x ten".split(",").flatMap((g, i) => g.split(" ").map((w) => [w, i] as const)));
+const sameWord = (a: string, b: string) => a === b || (NUMBER.has(a) && NUMBER.get(a) === NUMBER.get(b)) || (SHORT[a] ?? a) === (SHORT[b] ?? b);
 
 export function rankNames(found: Entity[], input: string): Ranked | null {
   const all = rankTyped(found, input);
@@ -150,6 +152,12 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
     const r = rankTyped(found, bare);
     return { pick, match: "closest", list: [pick, ...(r?.list ?? []).filter((e) => e !== pick)], offered: (e) => !!r?.offered(e), note: "title" };
   }
+  // The note names one title of a series exactly ("Indiana Jones (Raiders of the Lost Ark)", "Fast & Furious (Fast
+  // Five)", "La Casa de Papel (Money Heist)"): a full name of two words or more, not kind words, never an act (an
+  // act's note is as often a hometown that is also a band's name: "Moonsprout (New England)").
+  const full = words(noted).filter((w) => !SMALL.has(w) && !KIND.has(w) && !/^\d{4}$/.test(w));
+  const other = full.length >= 2 ? rankTyped(found.filter((e) => !isArtist(e)), noted) : null;
+  if (other && other.match !== "closest") return { ...other, match: "closest", note: "other name" };
   const r = rankTyped(found.filter((e) => !holdsNote(e)), bare);
   if (r) {
     // A year picks among the near names by Qloo's disambiguation: "The Lord of the Rings (2001)" is The Fellowship of
@@ -159,12 +167,7 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
     if (said.length) return { ...r, pick: said[0], match: "closest", list: [said[0], ...r.list.filter((e) => e !== said[0])], note: "year" };
     return { ...r, match: r.match === "exact" ? "closest" : r.match, note: "name", searchName: r.match === "closest" || year.length > 0 };
   }
-  // Another name is a full name of two words or more, not kind words ("Wednesday (band)" is not The Band), and
-  // never for an act: an act's note is as often its hometown, and a hometown is often also a band's name
-  // ("Moonsprout (New England)" is not the band New England), so an act Qloo doesn't know stays not found.
-  if (told.filter((w) => !KIND.has(w) && !/^\d{4}$/.test(w)).length < 2) return null;
-  const other = rankTyped(found, noted);
-  return other && other.match !== "closest" && !isArtist(other.pick) ? { ...other, match: "closest", note: "other name", searchName: true } : null;
+  return null;
 }
 
 // Search results for the whole text, then those for the name alone that weren't among them.

@@ -59,6 +59,8 @@ const NOTES: [string, any[], string][] = [
   ["Yasiin Bey (Mos Def)", [art("Mos Def")], "none"], // never another name for an act (pass 5); live, the name alone finds Yasiin Bey
   ["La Casa de Papel (Money Heist)", [film("Money Heist", "2017,2021")], "Money Heist (2017,2021) closest"],
   ["Moonsprout (indie rock band)", [art("Indie Rock Allstars")], "none"],
+  // A one-word note is never the name of another title: "Phoenix" is the actor here, though a 2014 film is named that.
+  ["Joker (Phoenix)", [film("Joker", "2019"), film("Phoenix", "2014")], "Joker (2019) closest"],
   // Nothing before the note, or nothing like it: no guess.
   ["(TV series)", [film("Succession")], "none"],
   ["Nobody Real (TV series)", [film("Succession")], "none"],
@@ -76,7 +78,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 93 realistic inputs get the entry a reasonable person expects", async () => {
+test("notes in brackets on Qloo's live answers: 112 realistic inputs get the entry a reasonable person expects", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -95,5 +97,5 @@ test("notes in brackets on Qloo's live answers: 93 realistic inputs get the entr
     if (!want(got)) wrong.push(`${input} -> ${got}`);
   }
   assert.deepEqual(wrong, []);
-  assert.ok(searches <= 120, `${searches} Qloo searches for 93 names`);
+  assert.ok(searches <= 138, `${searches} Qloo searches for 112 names`);
 });
