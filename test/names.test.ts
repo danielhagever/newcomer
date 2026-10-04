@@ -81,7 +81,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 132 realistic inputs get the entry a reasonable person expects", async () => {
+test("notes in brackets on Qloo's live answers: 140 realistic inputs get the entry a reasonable person expects", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -100,12 +100,12 @@ test("notes in brackets on Qloo's live answers: 132 realistic inputs get the ent
     if (!want(got)) wrong.push(`${input} -> ${got}`);
   }
   assert.deepEqual(wrong, []);
-  assert.ok(searches <= 169, `${searches} Qloo searches for 132 names`);
+  assert.ok(searches <= 182, `${searches} Qloo searches for 140 names`);
 });
 
 test("when the exact name wins, the title named in the note is offered first under Not it? (Qloo's live answers)", () => {
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
-  for (const [input, kind, offered] of [["Fast & Furious (Fast Five)", "movie", "Fast Five"], ["Better Call Saul (Breaking Bad)", "tv_show", "Breaking Bad"], ["Fuller House (Full House)", "tv_show", "Full House"]]) {
+  for (const [input, kind, offered] of [["Fast & Furious (Fast Five)", "movie", "Fast Five"], ["Better Call Saul (Breaking Bad)", "tv_show", "Breaking Bad"], ["Fuller House (Full House)", "tv_show", "Full House"], ["House of the Dragon (Game of Thrones)", "tv_show", "Game of Thrones"], ["Amy (Amy Winehouse)", "movie", "Amy Winehouse"]]) {
     const r = rankNames(together(F[`${kind}|${input}`], F[`${kind}|${withoutNote(input)}`]), input)!;
     assert.equal(r.list.filter((e) => e !== r.pick && r.offered(e))[0]?.name, offered, input);
   }

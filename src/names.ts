@@ -86,21 +86,24 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 132 such inputs are recorded in test/note-fixtures.json):
+// live answers for 140 such inputs are recorded in test/note-fixtures.json):
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
 //   Bourdain: Parts Unknown; "Batman (movie)" is not Batman: The Movie, "Interstellar (Nolan)" not Interstellar:
 //   Nolan's Odyssey). Not for acts: an act holding both names is a collaboration ("Mos Def (Yasiin Bey & Marvin Gaye)");
 // - the note as the exact name of one title ("Indiana Jones (Raiders of the Lost Ark)", "La Casa de Papel (Money
-//   Heist)"), for a full name of two words or more that aren't kind words, and
+//   Heist)"), for a name of two words or more, not all kind words ("Game of Thrones" counts), and
 //   never for an act: an act's note is as often a hometown that is also a band's name ("Moonsprout (New England)"),
 //   so "Ye (Kanye West)" is not found rather than guessed;
 // - when an entry is named exactly the name, it wins over a title named in the note, which is offered first under
 //   "Not it?" ("Better Call Saul (Breaking Bad)", "Chicago P.D. (Chicago Fire)", so also "Fast & Furious (Fast
 //   Five)" is the 2009 film), and a title must start with the name, small words aside ("The Fast and the Furious:
-//   Tokyo Drift"), or be made of only the name's and the note's words ("The Lost World: Jurassic Park"): "The
-//   Mandalorian (Star Wars)" is not Lego Star Wars: The Mandalorian;
+//   Tokyo Drift"; linking words too: "War for the Planet of the Apes"), or be made of only the name's and the
+//   note's words ("The Lost World: Jurassic Park"): "The Mandalorian (Star Wars)" is not Lego Star Wars: The
+//   Mandalorian. A name one letter off counts as named ("Better Call Saull (Breaking Bad)"), and a note holding the
+//   whole name plus words is a fuller name, not a subtitle ("Amy (Amy Winehouse)" is Amy, 2015), unless it adds
+//   only a number ("Toy Story (Toy Story 3)");
 // - the name alone, among entries that don't hold the note's words; a year in the note picks among the near names
 //   holding the whole name, by Qloo's disambiguation ("Dune (2021 film)"; "The Lord of the Rings (2001)" is The
 //   Fellowship of the Ring; "Spider-Man (2002 film)" is not Spider (2002)); "Dune (Part One)" is Dune, not Dune:
@@ -130,6 +133,7 @@ export interface Ranked {
 // Words that only say what kind of thing it is; a note made of them (and years) is never another name ("Wednesday
 // (band)" is not The Band).
 const KIND = new Set("band group rapper singer songwriter musician artist act dj producer duo trio composer film movie series show tv sitcom documentary docuseries miniseries anime cartoon podcast book novel game album song".split(" "));
+const LINKS = new Set(["for", "from", "to", "in", "on", "at", "with", "vs", "versus"]);
 const years = (s: string | undefined): string[] => s?.match(/\b\d{4}\b/g) ?? [];
 // In a title, a note's word must be there as written, or as its number twin ("2", "II", "Two") or short form.
 const SHORT: Record<string, string> = { pt: "part", vol: "volume", ep: "episode", ch: "chapter" };
@@ -154,14 +158,20 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   // "Fast & Furious (Fast Five)" is the 2009 film, with Fast Five offered), and a title must start with the name,
   // small words aside ("The Fast and the Furious: Tokyo Drift"), or be made of only the name's and the note's words
   // ("The Lost World: Jurassic Park"): "The Mandalorian (Star Wars)" is not Lego Star Wars: The Mandalorian.
-  const named_ = !!r && r.match !== "closest";
+  // A name one letter off counts as named too ("Better Call Saull (Breaking Bad)" is still Better Call Saul).
+  const named_ = !!r && (r.match !== "closest" || typoDistance(squashed(r.pick.name), squashed(bare)) <= (squashed(bare).length > 10 ? 2 : 1));
+  const noteWords = words(noted).filter((w) => !SMALL.has(w));
+  // A note holding the whole name and adding words is a fuller name ("Whitney (Whitney Houston)", "Amy (Amy
+  // Winehouse)"), not a subtitle; adding only a number, it's a sequel ("Toy Story (Toy Story 3)").
+  const fuller = named.every((w) => noteWords.some((x) => sameWord(w, x))) && !told.every((w) => NUMBER.has(w));
   // A title must hold the note's words that aren't kind words ("Batman (movie)" is not Batman: The Movie).
   const titleWords = told.filter((w) => !KIND.has(w));
   const holdsExactly = (e: Entity, ws: string[]) => !!ws.length && ws.every((w) => words(e.name).some((x) => sameWord(w, x)));
-  const lead = (e: Entity) => words(e.name).filter((w) => !SMALL.has(w));
+  // Linking words don't count in a title ("War for the Planet of the Apes").
+  const lead = (e: Entity) => words(e.name).filter((w) => !SMALL.has(w) && !LINKS.has(w));
   const startsWithName = (e: Entity) => named.every((w, i) => i < lead(e).length && sameWord(w, lead(e)[i]));
   const onlyNameAndNote = (e: Entity) => lead(e).every((x) => [...named, ...titleWords].some((w) => sameWord(w, x)));
-  const titled = found.filter((e) => !isArtist(e) && holdsExactly(e, titleWords) && holdsExactly(e, named) && (!named_ || startsWithName(e) || onlyNameAndNote(e)));
+  const titled = found.filter((e) => !isArtist(e) && holdsExactly(e, titleWords) && holdsExactly(e, named) && (!named_ || (!fuller && (startsWithName(e) || onlyNameAndNote(e)))));
   if (titled.length) {
     const near = (e: Entity) => share(words(input), words(e.name)) + share(words(e.name), words(input));
     const pick = titled.map((e, i) => ({ e, i, s: near(e) })).sort((x, y) => y.s - x.s || x.i - y.i)[0].e;
@@ -175,8 +185,7 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   // a full name of two words or more, not kind words, never an act (an act's note is as often a hometown that is
   // also a band's name: "Moonsprout (New England)"). The name alone is searched first, since an entry named exactly
   // that wins and may not be among the whole text's answers ("Fast & Furious (Fast Five)" found Fast Five only).
-  const full = words(noted).filter((w) => !SMALL.has(w) && !KIND.has(w) && !/^\d{4}$/.test(w));
-  const other = full.length >= 2 ? rankTyped(found.filter((e) => !isArtist(e)), noted) : null;
+  const other = noteWords.length >= 2 && noteWords.some((w) => !KIND.has(w) && !/^\d{4}$/.test(w)) ? rankTyped(found.filter((e) => !isArtist(e)), noted) : null;
   const otherPick = other && other.match !== "closest" ? other.pick : null;
   if (otherPick && !named_) return { ...other!, match: "closest", note: "other name", searchName: true };
   if (r) {

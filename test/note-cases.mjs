@@ -134,6 +134,15 @@ export const T = [
   ["Girl Meets World (Boy Meets World)", "tv_show", only("Girl Meets World")],
   ["That '90s Show (That '70s Show)", "tv_show", (l) => /^that '90s show/i.test(l)],
   ["Chicago P.D. (Chicago Fire)", "tv_show", (l) => /^chicago p\.?d/i.test(l)],
+  // pass 9 (written before recording): titles linked by "for"/"from", a note that is a fuller name, a typo in the name
+  ["Planet of the Apes (War)", "movie", (l) => /^war for the planet of the apes/i.test(l)],
+  ["Planet of the Apes (Escape)", "movie", (l) => /^escape from the planet of the apes/i.test(l)],
+  ["Whitney (Whitney Houston)", "movie", at("whitney", "2018")],
+  ["Amy (Amy Winehouse)", "movie", at("amy", "2015")],
+  ["Senna (Ayrton Senna)", "movie", at("senna", "2010")],
+  ["Batman (The Dark Knight)", "movie", at("batman", "1989")], // policy: the exact name wins, The Dark Knight offered
+  ["Better Call Saull (Breaking Bad)", "tv_show", only("Better Call Saul")],
+  ["Fuller Hous (Full House)", "tv_show", only("Fuller House")],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],
