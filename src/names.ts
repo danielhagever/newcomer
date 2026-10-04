@@ -86,14 +86,15 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 44 such inputs are recorded in test/note-fixtures.json):
-// - a title holding both the name and every word of the note, in either order ("Star Wars (The Empire Strikes
-//   Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony Bourdain: Parts Unknown). Not for acts:
-//   an act holding both names is a collaboration ("Mos Def (Yasiin Bey & Marvin Gaye)");
-// - the name alone, among entries that don't hold the note's words; the note's words pick among entries that
-//   share the name by Qloo's disambiguation, a film's year ("Dune (2021 film)"); "Dune (Part One)" is Dune, not
-//   Dune: Part Two;
-// - the note as another name, used only when it is that name exactly ("Yasiin Bey (Mos Def)").
+// live answers for 64 such inputs are recorded in test/note-fixtures.json):
+// - a title holding both the name and every word of the note that isn't already in the name, in either order
+//   ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony Bourdain:
+//   Parts Unknown). Not for acts: an act holding both names is a collaboration ("Mos Def (Yasiin Bey & Marvin Gaye)");
+// - the name alone, among entries that don't hold the note's words; a year in the note picks among the near names
+//   by Qloo's disambiguation ("Dune (2021 film)"; "The Lord of the Rings (2001)" is The Fellowship of the Ring);
+//   "Dune (Part One)" is Dune, not Dune: Part Two;
+// - the note as another name, only when it is that name exactly, after the name alone was searched too ("Yasiin
+//   Bey (Mos Def)"), and never for a note that only says what kind of thing it is ("Wednesday (band)" is not The Band).
 // The note's words never make a match on their own ("Scream: The TV Series" for "Succession (TV series)", live),
 // and the pick is only a closest match, since what was typed wasn't a name. A whole text that is exactly a name
 // ("Birdman (or The Unexpected Virtue of Ignorance)") is that name.
@@ -110,19 +111,26 @@ export interface Ranked {
   offered: (e: Entity) => boolean; // close enough to offer under "Not it?"
   note?: "title" | "year" | "name" | "other name"; // how a note in brackets was read
   // Qloo is searched with the whole text first; the name alone is searched too when nothing matched, when the
-  // name matched only loosely ("The Godfather (Part I)" found only Part II and III), or when the note's year
-  // wasn't among the entries ("Dune (2021 film)" found only the 1984 film).
+  // name matched only loosely ("The Godfather (Part I)" found only Part II and III), when the note's year wasn't
+  // among the entries ("Dune (2021 film)" found only the 1984 film), or before taking the note as another name.
   searchName?: boolean;
 }
 
-// The candidates Qloo's search returned for what was typed, ranked; null when none resembles it.
-export function rankNames(found: Entity[], input: string): Ranked | null {
+// The candidates Qloo's search returned for what was typed, ranked; null when none resembles it. nameSearched:
+// the candidates include those for the name alone.
+// Words that only say what kind of thing it is; a note made of them (and years) is never another name ("Wednesday
+// (band)" is not The Band).
+const KIND = new Set("band group rapper singer songwriter musician artist act dj producer duo trio composer film movie series show tv sitcom documentary docuseries miniseries anime cartoon podcast book novel game album song".split(" "));
+const years = (s: string | undefined): string[] => s?.match(/\b\d{4}\b/g) ?? [];
+
+export function rankNames(found: Entity[], input: string, nameSearched = false): Ranked | null {
   const all = rankTyped(found, input);
   const bare = withoutNote(input);
   if (all?.match === "exact" || bare === input) return all;
   const noted = NOTE.exec(input)![1];
-  const told = words(noted).filter((w) => !SMALL.has(w));
   const named = words(bare).filter((w) => !SMALL.has(w));
+  // The note's words that aren't already in the name ("Chance the Rapper (rapper)" adds nothing).
+  const told = words(noted).filter((w) => !SMALL.has(w) && !closeTo(w, named, false));
   const holds = (e: Entity, ws: string[]) => !!ws.length && ws.every((w) => closeTo(w, words(e.name), false));
   const holdsNote = (e: Entity) => holds(e, told);
   const isArtist = (e: Entity) => e.types.includes("urn:entity:artist");
@@ -135,13 +143,16 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   }
   const r = rankTyped(found.filter((e) => !holdsNote(e)), bare);
   if (r) {
-    const said = r.match === "ambiguous" ? r.list.filter((e) => squashed(e.name) === squashed(r.pick.name) && !!e.disambiguation && words(e.disambiguation).some((w) => told.includes(w))) : [];
-    if (said.length === 1) return { ...r, pick: said[0], match: "closest", list: [said[0], ...r.list.filter((e) => e !== said[0])], note: "year" };
-    const year = told.some((w) => /^\d{4}$/.test(w));
-    return { ...r, match: r.match === "exact" ? "closest" : r.match, note: "name", searchName: r.match === "closest" || year };
+    // A year picks among the near names by Qloo's disambiguation: "The Lord of the Rings (2001)" is The Fellowship of
+    // the Ring, not the 1978 film named exactly that.
+    const year = years(noted);
+    const said = year.length ? r.list.filter((e) => years(e.disambiguation).some((y) => year.includes(y))) : [];
+    if (said.length) return { ...r, pick: said[0], match: "closest", list: [said[0], ...r.list.filter((e) => e !== said[0])], note: "year" };
+    return { ...r, match: r.match === "exact" ? "closest" : r.match, note: "name", searchName: r.match === "closest" || year.length > 0 };
   }
+  if (!told.length || told.every((w) => KIND.has(w) || /^\d{4}$/.test(w))) return null;
   const other = rankTyped(found, noted);
-  return other && other.match !== "closest" ? { ...other, match: "closest", note: "other name" } : null;
+  return other && other.match !== "closest" ? { ...other, match: "closest", note: "other name", searchName: !nameSearched } : null;
 }
 
 // Search results for the whole text, then those for the name alone that weren't among them.

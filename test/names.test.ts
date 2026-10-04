@@ -76,7 +76,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 44 realistic inputs get the entry a reasonable person expects", async () => {
+test("notes in brackets on Qloo's live answers: 64 realistic inputs get the entry a reasonable person expects", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -88,12 +88,12 @@ test("notes in brackets on Qloo's live answers: 44 realistic inputs get the entr
     let r = rankNames(whole, input);
     searches++;
     if (withoutNote(input) !== input && (!r || r.searchName)) {
-      r = rankNames(together(whole, F[`${kind}|${withoutNote(input)}`]), input);
+      r = rankNames(together(whole, F[`${kind}|${withoutNote(input)}`]), input, true);
       searches++;
     }
     const got = r ? show(r.pick) : "none";
     if (!want(got)) wrong.push(`${input} -> ${got}`);
   }
   assert.deepEqual(wrong, []);
-  assert.ok(searches <= 56, `${searches} Qloo searches for 44 names`);
+  assert.ok(searches <= 78, `${searches} Qloo searches for 64 names`);
 });

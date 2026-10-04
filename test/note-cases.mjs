@@ -53,6 +53,28 @@ export const T = [
   // nothing real
   ["Moonsprout (indie rock band)", "artist", none],
   ["Nobody Real Qzx (TV series)", "tv_show", none],
+  // pass 4 (written before recording): a note word that is also a name ("band" -> The Band), a note already in the
+  // name, a year that names a different entry than the plain title
+  ["Wednesday (band)", "artist", (l) => /^wednesday( \(|$)/i.test(l)],
+  ["Moonsprout (band)", "artist", none],
+  ["Chance the Rapper (rapper)", "artist", starts("Chance the Rapper")],
+  ["Band of Horses (band)", "artist", starts("Band of Horses")],
+  ["Zac Brown Band (band)", "artist", starts("Zac Brown Band")],
+  ["Kendrick Lamar (rapper)", "artist", starts("Kendrick Lamar")],
+  ["Drake (rapper)", "artist", (l) => /^drake( \(|$)/i.test(l)],
+  ["Arctic Monkeys (band)", "artist", starts("Arctic Monkeys")],
+  ["Bon Iver (band)", "artist", starts("Bon Iver")],
+  ["The Band (group)", "artist", (l) => /^the band( \(|$)/i.test(l)],
+  ["The Lord of the Rings (2001)", "movie", has("fellowship")],
+  ["The Lion King (1994)", "movie", has("lion king", "1994")],
+  ["The Lion King (2019)", "movie", has("lion king", "2019")],
+  ["Little Women (2019)", "movie", has("little women", "2019")],
+  ["The Batman (2022)", "movie", has("batman", "2022")],
+  ["Batman (1989)", "movie", has("batman", "1989")],
+  ["Spider-Man (2002)", "movie", has("spider", "2002")],
+  ["Dune (1984)", "movie", has("dune", "1984")],
+  ["Fargo (TV series)", "tv_show", starts("Fargo")],
+  ["The Office (2005)", "tv_show", has("office", "2005")],
   // names that end in brackets themselves
   ["Birdman (or The Unexpected Virtue of Ignorance)", "movie", starts("Birdman")],
 ];
