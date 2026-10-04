@@ -9,7 +9,7 @@
 // - every place carries Qloo's own neighborhood name and time-of-day fit.
 
 import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type QlooEnv, type Signals, type Tag } from "./qloo.ts";
-import { nameKey as typedName, rankNames, resembles, withoutNote } from "./names.ts";
+import { nameKey as typedName, rankNames, resembles, together, withoutNote } from "./names.ts";
 export { resembles };
 import { cityCenter, cellKey, km, namesFor } from "./geo.ts";
 import { AppError, type Budget } from "./limits.ts";
@@ -122,7 +122,12 @@ const choice = (e: Entity): Choice => ({ id: e.id, name: label(e), type: TYPE_WO
 const term = (it: Interest) => it.query ?? it.name;
 
 async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Resolved | null> {
-  const ranked = rankNames(await q.search(withoutNote(term(it)), type, 5), term(it));
+  const found = await q.search(term(it), type, 5);
+  let ranked = rankNames(found, term(it));
+  // A note in brackets that told nothing: the name alone is searched too ("Succession (TV series)" found only
+  // "Scream: The TV Series" live).
+  if (withoutNote(term(it)) !== term(it) && (!ranked || ranked.note === "set aside"))
+    ranked = rankNames(together(found, await q.search(withoutNote(term(it)), type, 5)), term(it));
   if (!ranked) return null;
   const { pick, match } = ranked;
   let others = ranked.list.filter((e) => e.id !== pick.id && ranked.offered(e));
@@ -150,11 +155,13 @@ async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Reso
 // A taste (ramen, bouldering, jazz) can have a map variant (a genre) and a place variant (a cuisine,
 // an activity): Qloo lists the same name in many families, each with the entity types it applies to.
 async function resolveTag(q: Qloo, it: Interest): Promise<Resolved | null> {
-  const list = (await q.tags(term(it), 20)).filter((t) => resembles(term(it), t.name));
+  // A note in brackets isn't a taste: "Moonsprout (indie rock band)" is not the Indie Rock genre.
+  const text = withoutNote(term(it));
+  const list = (await q.tags(text, 20)).filter((t) => resembles(text, t.name));
   if (!list.length) return null;
   // An exact name only counts if one of its tags can act (a media keyword alone can't); otherwise the
   // closest tag that can act is used, flagged as closest.
-  const exact = list.filter((t) => typedName(t.name) === typedName(term(it)) && (placeTag(t) || musicTag(t) || mediaTag(t)));
+  const exact = list.filter((t) => typedName(t.name) === typedName(text) && (placeTag(t) || musicTag(t) || mediaTag(t)));
   const pool = exact.length ? exact : list;
   const forPlaces = pool.find(placeTag);
   // Yoga and skateboarding are also music genres; when the word means an activity or a food, its

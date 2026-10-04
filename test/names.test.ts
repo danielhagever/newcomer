@@ -48,6 +48,16 @@ const NOTES: [string, any[], string][] = [
   ["Succession (TV series)", [film("Scream: The TV Series", "2015,2019")], "none"],
   ["Wednesday (indie rock band)", [art("Lafayette Afro Rock Band")], "none"],
   ["Dune (2021 film)", [film("Dune", "1984")], "Dune (1984) closest"], // the year can't pick what wasn't found; flagged as closest
+  // The note is part of the name: a subtitle picks the entry that holds both (seen as a regression: these went to the first film).
+  ["Star Wars (The Empire Strikes Back)", [film("Star Wars", "1977"), film("Star Wars: Episode V - The Empire Strikes Back", "1980"), film("Star Wars: Episode VI - Return of the Jedi", "1983")], "Star Wars: Episode V - The Empire Strikes Back (1980) closest"],
+  ["Star Wars (Return of the Jedi)", [film("Star Wars", "1977"), film("Star Wars: Episode V - The Empire Strikes Back", "1980"), film("Star Wars: Episode VI - Return of the Jedi", "1983")], "Star Wars: Episode VI - Return of the Jedi (1983) closest"],
+  ["Harry Potter (Prisoner of Azkaban)", [film("Harry Potter and the Sorcerer's Stone", "2001"), film("Harry Potter and the Prisoner of Azkaban", "2004")], "Harry Potter and the Prisoner of Azkaban (2004) closest"],
+  ["Lord of the Rings (Return of the King)", [film("The Lord of the Rings: The Fellowship of the Ring", "2001"), film("The Lord of the Rings: The Return of the King", "2003")], "The Lord of the Rings: The Return of the King (2003) closest"],
+  ["Dune (Part Two)", [film("Dune", "2021"), film("Dune: Part Two", "2024")], "Dune: Part Two (2024) exact"], // the same words as the name
+  // The note is another name for it: used only when it is that name exactly.
+  ["Yasiin Bey (Mos Def)", [art("Mos Def")], "Mos Def closest"],
+  ["La Casa de Papel (Money Heist)", [film("Money Heist", "2017,2021")], "Money Heist (2017,2021) closest"],
+  ["Moonsprout (indie rock band)", [art("Indie Rock Allstars")], "none"],
   // Nothing before the note, or nothing like it: no guess.
   ["(TV series)", [film("Succession")], "none"],
   ["Nobody Real (TV series)", [film("Succession")], "none"],

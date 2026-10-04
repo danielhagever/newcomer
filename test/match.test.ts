@@ -752,10 +752,13 @@ test("interests are matched by Booker's name rules: near names ranked by closene
   }
 });
 
-test("a note in brackets is left out of the Qloo search and picks among same-named entries (live: the whole text found 'Scream: The TV Series')", async () => {
+test("a note in brackets: a subtitle, a year, or set aside, with the name searched alone when the whole text finds nothing like it (live: 'Scream: The TV Series'); never a genre", async () => {
   const results: Record<string, any[]> = {
     // What the live search answered for the whole text, and what it answers for the name.
     "Succession (TV series)": [{ entity_id: UUID(11), name: "Scream: The TV Series", disambiguation: "2015,2019", types: ["urn:entity:tv_show"] }],
+    "Dune (2021 film)": [{ entity_id: UUID(13), name: "Dune", disambiguation: "1984", types: ["urn:entity:movie"] }],
+    "Star Wars (The Empire Strikes Back)": [{ entity_id: UUID(15), name: "Star Wars: Episode V - The Empire Strikes Back", disambiguation: "1980", types: ["urn:entity:movie"] }],
+    "Star Wars": [{ entity_id: UUID(16), name: "Star Wars", disambiguation: "1977", types: ["urn:entity:movie"] }],
     Succession: [{ entity_id: UUID(12), name: "Succession", disambiguation: "2018,2023", types: ["urn:entity:tv_show"] }],
     Dune: [
       { entity_id: UUID(13), name: "Dune", disambiguation: "1984", types: ["urn:entity:movie"] },
@@ -764,16 +767,25 @@ test("a note in brackets is left out of the Qloo search and picks among same-nam
   };
   const m = mockFetch((c) => {
     if (qloo(c) && c.path === "/search") return { body: { results: results[c.params.get("query") ?? ""] ?? [] } };
-    if (qloo(c) && c.path === "/v2/tags") return { body: { results: { tags: [] } } };
+    // The genre search finds Indie Rock for any text holding "indie rock".
+    if (qloo(c) && c.path === "/v2/tags")
+      return { body: { results: { tags: /indie rock/i.test(c.params.get("filter.query") ?? "") ? [tag("urn:tag:genre:music:indie_rock", "Indie Rock", ["urn:entity:artist"])] : [] } } };
     return standardQloo()(c);
   });
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [
       { name: "Succession (TV series)", kind: "tv_show" as const },
       { name: "Dune (2021 film)", kind: "movie" as const },
+      { name: "Star Wars (The Empire Strikes Back)", kind: "movie" as const },
+      { name: "Moonsprout (indie rock band)", kind: "artist" as const },
     ]);
     const got = Object.fromEntries(r.resolved.map((x) => [x.input, `${x.as} ${x.match}`]));
-    assert.deepEqual(got, { "Succession (TV series)": "Succession (2018,2023) closest", "Dune (2021 film)": "Dune (2021) closest" });
+    assert.deepEqual(got, {
+      "Succession (TV series)": "Succession (2018,2023) closest",
+      "Dune (2021 film)": "Dune (2021) closest",
+      "Star Wars (The Empire Strikes Back)": "Star Wars: Episode V - The Empire Strikes Back (1980) closest", // the whole text's search found it
+    });
+    assert.deepEqual(r.unresolved, ["Moonsprout (indie rock band)"], "the note isn't a genre");
   } finally {
     m.restore();
   }
