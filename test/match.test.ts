@@ -751,3 +751,30 @@ test("interests are matched by Booker's name rules: near names ranked by closene
     m.restore();
   }
 });
+
+test("a note in brackets is left out of the Qloo search and picks among same-named entries (live: the whole text found 'Scream: The TV Series')", async () => {
+  const results: Record<string, any[]> = {
+    // What the live search answered for the whole text, and what it answers for the name.
+    "Succession (TV series)": [{ entity_id: UUID(11), name: "Scream: The TV Series", disambiguation: "2015,2019", types: ["urn:entity:tv_show"] }],
+    Succession: [{ entity_id: UUID(12), name: "Succession", disambiguation: "2018,2023", types: ["urn:entity:tv_show"] }],
+    Dune: [
+      { entity_id: UUID(13), name: "Dune", disambiguation: "1984", types: ["urn:entity:movie"] },
+      { entity_id: UUID(14), name: "Dune", disambiguation: "2021", types: ["urn:entity:movie"] },
+    ],
+  };
+  const m = mockFetch((c) => {
+    if (qloo(c) && c.path === "/search") return { body: { results: results[c.params.get("query") ?? ""] ?? [] } };
+    if (qloo(c) && c.path === "/v2/tags") return { body: { results: { tags: [] } } };
+    return standardQloo()(c);
+  });
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [
+      { name: "Succession (TV series)", kind: "tv_show" as const },
+      { name: "Dune (2021 film)", kind: "movie" as const },
+    ]);
+    const got = Object.fromEntries(r.resolved.map((x) => [x.input, `${x.as} ${x.match}`]));
+    assert.deepEqual(got, { "Succession (TV series)": "Succession (2018,2023) closest", "Dune (2021 film)": "Dune (2021) closest" });
+  } finally {
+    m.restore();
+  }
+});

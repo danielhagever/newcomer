@@ -2,7 +2,7 @@
 // with Booker; its venue and list cases don't apply here and are skipped). Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rankNames } from "../src/names.ts";
+import { rankNames, withoutNote } from "../src/names.ts";
 // @ts-ignore: plain JavaScript table
 import cases from "./name-cases.mjs";
 
@@ -44,6 +44,10 @@ const NOTES: [string, any[], string][] = [
   ["Tom Pety (singer)", [art("Tom Waits"), art("Tom Petty")], "Tom Petty closest"],
   // A name that itself ends in brackets is still exact.
   ["Birdman (or The Unexpected Virtue of Ignorance)", [film("Birdman (or The Unexpected Virtue of Ignorance)", "2014"), film("Birdman")], "Birdman (or The Unexpected Virtue of Ignorance) (2014) exact"],
+  // Seen live (Qloo searched with the whole text): a candidate that only shares the note's words is not a match.
+  ["Succession (TV series)", [film("Scream: The TV Series", "2015,2019")], "none"],
+  ["Wednesday (indie rock band)", [art("Lafayette Afro Rock Band")], "none"],
+  ["Dune (2021 film)", [film("Dune", "1984")], "Dune (1984) closest"], // the year can't pick what wasn't found; flagged as closest
   // Nothing before the note, or nothing like it: no guess.
   ["(TV series)", [film("Succession")], "none"],
   ["Nobody Real (TV series)", [film("Succession")], "none"],
@@ -52,4 +56,11 @@ const NOTES: [string, any[], string][] = [
 test("a note in brackets at the end picks which one, and the pick is only ever a closest match", () => {
   const wrong = NOTES.filter(([typed, found, want]) => label(rankNames(found, typed)) !== want).map(([typed, found]) => `${typed} -> ${label(rankNames(found, typed))}`);
   assert.deepEqual(wrong, []);
+});
+
+test("Qloo is searched with the name before a note in brackets", () => {
+  assert.equal(withoutNote("Succession (TV series)"), "Succession");
+  assert.equal(withoutNote("Dune [2021]"), "Dune");
+  assert.equal(withoutNote("(TV series)"), "(TV series)");
+  assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });

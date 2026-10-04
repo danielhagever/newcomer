@@ -197,6 +197,8 @@ export default async function ({ place, art, runVenue, runArtist, runSplit, is, 
   await runArtist("Phoebe Bridgers (singer-songwriter)", A(["Phoebe Bridgers"]), aIs("Phoebe Bridgers", "closest"));
   await runArtist("Tom Pety (singer)", A(["Tom Waits", "Tom Petty"]), aIs("Tom Petty", "closest"));
   await runArtist("Nobody Real (indie rock band)", A(["Big Thief"]), is("none"));
+  // Seen live (Qloo searched with the whole text): a name that only shares the note's words is not a match.
+  await runArtist("Wednesday (indie rock band)", A(["Lafayette Afro Rock Band"]), is("none"));
   await runArtist("Wild Child", A(["Wild Child", "Wildchild"]), aIs("Wild Child", "exact"));
   await runArtist("Wildchild", A(["Wild Child", "Wildchild"]), aIs("Wildchild", "exact"));
   await runArtist("Wild Child", A(["Wildchild", "Wild Nothing", "Child Bite"]), (o) => !o.includes("exact"), "only the space-free namesake found");

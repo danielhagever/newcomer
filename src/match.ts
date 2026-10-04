@@ -9,7 +9,7 @@
 // - every place carries Qloo's own neighborhood name and time-of-day fit.
 
 import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type QlooEnv, type Signals, type Tag } from "./qloo.ts";
-import { nameKey as typedName, rankNames, resembles } from "./names.ts";
+import { nameKey as typedName, rankNames, resembles, withoutNote } from "./names.ts";
 export { resembles };
 import { cityCenter, cellKey, km, namesFor } from "./geo.ts";
 import { AppError, type Budget } from "./limits.ts";
@@ -122,14 +122,14 @@ const choice = (e: Entity): Choice => ({ id: e.id, name: label(e), type: TYPE_WO
 const term = (it: Interest) => it.query ?? it.name;
 
 async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Resolved | null> {
-  const ranked = rankNames(await q.search(term(it), type, 5), term(it));
+  const ranked = rankNames(await q.search(withoutNote(term(it)), type, 5), term(it));
   if (!ranked) return null;
   const { pick, match } = ranked;
   let others = ranked.list.filter((e) => e.id !== pick.id && ranked.offered(e));
   // The kind was the model's guess ("Dune" as a book): when the match is uncertain, offer the same
   // name in every kind too, so the person can pick the film.
   if (match !== "exact" && type) {
-    const any = rankNames(await q.search(term(it), undefined, 5).catch(() => []), term(it));
+    const any = rankNames(await q.search(withoutNote(term(it)), undefined, 5).catch(() => []), term(it));
     const anyKind = (any?.list ?? []).filter((e) => e.id !== pick.id && any!.offered(e) && !others.some((o) => o.id === e.id));
     others = [...others.slice(0, 2), ...anyKind.slice(0, 3), ...others.slice(2)];
   }
