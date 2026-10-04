@@ -86,8 +86,8 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order:
-// - part of the name, a subtitle: the entry holding both the name and the note's words ("Star Wars (The Empire
-//   Strikes Back)" is Episode V, not the 1977 film);
+// - part of the name, a subtitle: the entry that starts with the name and holds the note's words ("Star Wars
+//   (The Empire Strikes Back)" is Episode V, not the 1977 film);
 // - about the name: the name before it is matched, and the note's words pick among entries that share that name
 //   by Qloo's disambiguation, a film's year ("Dune (2021 film)"; "Succession (TV series)" is Succession);
 // - another name for it, used only when it is that name exactly ("Yasiin Bey (Mos Def)").
@@ -118,15 +118,18 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   if (all?.match === "exact" || bare === input) return all;
   const noted = NOTE.exec(input)![1];
   const told = words(noted).filter((w) => !SMALL.has(w));
-  const both = (e: Entity) => !!rankTyped([e], bare) && !!told.length && share(told, words(e.name)) >= 0.5;
-  const subtitled = found.filter(both);
+  // An entry holding the note's words is a subtitle when it starts with the name ("Harry Potter and the Prisoner
+  // of Azkaban"); one that only holds both, a collaboration ("Mos Def (Yasiin Bey & Marvin Gaye)", live), is
+  // neither the subtitle nor the name alone.
+  const holdsNote = (e: Entity) => !!told.length && share(told, words(e.name)) >= 0.5;
+  const subtitled = found.filter((e) => ` ${nameKey(e.name)} `.startsWith(` ${nameKey(bare)} `) && holdsNote(e));
   if (subtitled.length) {
     const near = (e: Entity) => share(words(input), words(e.name)) + share(words(e.name), words(input));
     const pick = subtitled.map((e, i) => ({ e, i, s: near(e) })).sort((x, y) => y.s - x.s || x.i - y.i)[0].e;
     const r = rankTyped(found, bare);
     return { pick, match: "closest", list: [pick, ...(r?.list ?? []).filter((e) => e !== pick)], offered: (e) => !!r?.offered(e), note: "subtitle" };
   }
-  const r = rankTyped(found, bare);
+  const r = rankTyped(found.filter((e) => !holdsNote(e)), bare);
   if (r) {
     const said = r.match === "ambiguous" ? r.list.filter((e) => squashed(e.name) === squashed(r.pick.name) && !!e.disambiguation && words(e.disambiguation).some((w) => told.includes(w))) : [];
     if (said.length === 1) return { ...r, pick: said[0], match: "closest", list: [said[0], ...r.list.filter((e) => e !== said[0])], note: "year" };

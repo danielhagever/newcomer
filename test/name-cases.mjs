@@ -201,6 +201,8 @@ export default async function ({ place, art, runVenue, runArtist, runSplit, is, 
   await runArtist("Wednesday (indie rock band)", A(["Lafayette Afro Rock Band"]), is("none"));
   // The note is another name for the act: used only when it is that name exactly.
   await runArtist("Yasiin Bey (Mos Def)", A(["Mos Def"]), aIs("Mos Def", "closest"));
+  // Live, Qloo's whole-text search: a collaboration holds both names but is not a subtitle (it doesn't start with the name).
+  await runArtist("Yasiin Bey (Mos Def)", A(["Mos Def (Yasiin Bey & Marvin Gaye)", "Mos Def", "Mos Def Pharoahe Monch Nate Do", "Mos Def and Diverse", "Mos Def, Diverse & Prefuse 73"]), aIs("Mos Def", "closest"));
   await runArtist("Moonsprout (indie rock band)", A(["Indie Rock Allstars"]), is("none"));
   await runArtist("Wild Child", A(["Wild Child", "Wildchild"]), aIs("Wild Child", "exact"));
   await runArtist("Wildchild", A(["Wild Child", "Wildchild"]), aIs("Wildchild", "exact"));
