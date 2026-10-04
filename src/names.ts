@@ -91,8 +91,28 @@ export interface Ranked {
   offered: (e: Entity) => boolean; // close enough to offer under "Not it?"
 }
 
+// A note in brackets at the end ("Succession (TV series)", "Dune (2021 film)") is how an agent or a person says
+// which one; it isn't part of the name. When the whole text isn't an exact name, the name before the note is
+// matched, the note's words pick among entries that share that name by Qloo's disambiguation (a film's year),
+// and the pick is only a closest match, since what was typed wasn't a name. A name that ends in brackets itself
+// ("Birdman (or The Unexpected Virtue of Ignorance)") is still exact.
+const NOTE = /\s*[([]([^()[\]]*)[)\]]\s*$/;
+
 // The candidates Qloo's search returned for what was typed, ranked; null when none resembles it.
 export function rankNames(found: Entity[], input: string): Ranked | null {
+  const all = rankTyped(found, input);
+  const note = NOTE.exec(input);
+  const bare = note ? input.slice(0, note.index).trim() : "";
+  if (all?.match === "exact" || !note) return all;
+  const r = rankTyped(found, bare);
+  if (!r) return all;
+  const told = words(note[1]);
+  const said = r.match === "ambiguous" ? r.list.filter((e) => squashed(e.name) === squashed(r.pick.name) && !!e.disambiguation && words(e.disambiguation).some((w) => told.includes(w))) : [];
+  if (said.length === 1) return { ...r, pick: said[0], match: "closest", list: [said[0], ...r.list.filter((e) => e !== said[0])] };
+  return { ...r, match: r.match === "exact" ? "closest" : r.match };
+}
+
+function rankTyped(found: Entity[], input: string): Ranked | null {
   // Typed with an article, the name letter for letter comes first ("The Killers" is The Killers before
   // Killers; "A Savage" is A. Savage before Savage), and a name equal without the article still makes it
   // ambiguous ("The Eagles" may mean Eagles). Typed without one, the spelling says nothing about the article:

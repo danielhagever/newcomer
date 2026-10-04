@@ -26,7 +26,7 @@ const failure = (e: unknown) => {
 };
 
 // Bump whenever the pipeline or the result format changes, so no one gets yesterday's logic.
-const CACHE_VERSION = 13;
+const CACHE_VERSION = 14;
 
 // Returns the result and whether it came from the day's cache (the page says so: the timings in
 // "How we know" are from the run that made it). Only a new search passes the hourly gate: a saved answer
@@ -127,6 +127,34 @@ function buildServer(env: Env, req: Request): McpServer {
   return server;
 }
 
+// The batch check reads the body before the MCP library does, so it reads at most 256 KB (a real call is a few
+// KB): a huge body is refused at once instead of being read and parsed in full.
+const MAX_MCP_BODY = 262_144;
+async function mcpBody(req: Request): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (Number(req.headers.get("content-length")) > MAX_MCP_BODY) return null;
+  const reader = req.body?.getReader();
+  if (!reader) return new Uint8Array();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_MCP_BODY) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    parts.push(value);
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const p of parts) {
+    all.set(p, at);
+    at += p.byteLength;
+  }
+  return all;
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
@@ -134,9 +162,17 @@ export default {
       // One tool call per HTTP request: a JSON-RPC batch of several would run them side by side, each with its own
       // 48-call budget and Qloo pacing, so together they could break both.
       if (req.method === "POST") {
-        const body = await req.clone().json().catch(() => null);
+        const bytes = await mcpBody(req);
+        if (!bytes) return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Request too large." } }, 413);
+        let body: unknown = null;
+        try {
+          body = JSON.parse(new TextDecoder().decode(bytes));
+        } catch {
+          // Not JSON: the MCP library answers that.
+        }
         if (Array.isArray(body) && body.filter((m) => m?.method === "tools/call").length > 1)
           return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Send one tool call per request." } }, 400);
+        req = new Request(req.url, { method: "POST", headers: req.headers, body: bytes });
       }
       return createMcpHandler(() => buildServer(env, req)).fetch(req);
     }

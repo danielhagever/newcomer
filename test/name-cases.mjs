@@ -191,6 +191,12 @@ export default async function ({ place, art, runVenue, runArtist, runSplit, is, 
   // ---------- artists ----------
   const A = (names, genre) => names.map((x) => art(x, genre));
   const aIs = (name, ...m) => (o) => m.some((x) => o === `${name} ${x}`);
+  // A note in brackets at the end says which one; it isn't part of the name, and the pick is only a closest match.
+  await runArtist("Wednesday (indie rock band)", A(["Wednesday", "Wednesday 13"]), aIs("Wednesday", "closest"));
+  await runArtist("Big Thief (Brooklyn band)", A(["Big Thief", "Big Sean"]), aIs("Big Thief", "closest"));
+  await runArtist("Phoebe Bridgers (singer-songwriter)", A(["Phoebe Bridgers"]), aIs("Phoebe Bridgers", "closest"));
+  await runArtist("Tom Pety (singer)", A(["Tom Waits", "Tom Petty"]), aIs("Tom Petty", "closest"));
+  await runArtist("Nobody Real (indie rock band)", A(["Big Thief"]), is("none"));
   await runArtist("Wild Child", A(["Wild Child", "Wildchild"]), aIs("Wild Child", "exact"));
   await runArtist("Wildchild", A(["Wild Child", "Wildchild"]), aIs("Wildchild", "exact"));
   await runArtist("Wild Child", A(["Wildchild", "Wild Nothing", "Child Bite"]), (o) => !o.includes("exact"), "only the space-free namesake found");

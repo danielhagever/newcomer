@@ -113,7 +113,7 @@ test("MCP: a closest match tells the agent the alternatives and their IDs", asyn
     const data = JSON.parse(text.split("\n").find((l) => l.startsWith("data: "))!.slice(6));
     const said = data.result.content[0].text as string;
     assert.match(said, /closest Qloo match/);
-    assert.match(said, /\[id 00000000-0000-4000-8000-00000000000[23]\]/, "the pick's Qloo id is given, so the agent can send it back");
+    assert.match(said, /was matched to Dune Messiah \[id 00000000-0000-4000-8000-000000000002\]/, "the pick's own Qloo id is given, so the agent can send it back");
     assert.match(said, /Dune: Part Two \(\w[\w ]*\) \[id 00000000-0000-4000-8000-000000000003\]|Dune: Part Two \[id 00000000-0000-4000-8000-000000000003\]/);
   } finally {
     m.restore();
@@ -256,4 +256,19 @@ test("MCP: one tool call per request, blank input refused before any count or lo
     m.restore();
     delete (globalThis as any).caches;
   }
+});
+
+test("MCP: a body over 256 KB is refused before it is read in full; a normal call still works", async () => {
+  const headers = { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18" };
+  const mcp = (body: BodyInit, more: Record<string, string> = {}) =>
+    worker.fetch(new Request("https://newcomer.test/mcp", { method: "POST", headers: { ...headers, ...more }, body, duplex: "half" } as RequestInit), env());
+  const big = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: { pad: "x".repeat(300_000) } });
+  assert.equal((await mcp(big)).status, 413);
+  // Streamed, with no length given.
+  assert.equal((await mcp(new ReadableStream({ start: (c) => (c.enqueue(new TextEncoder().encode(big)), c.close()) }))).status, 413);
+  // A stated length over the cap is refused without reading at all (this body would fail if it were read).
+  assert.equal((await mcp(new ReadableStream({ pull: () => { throw new Error("read"); } }), { "content-length": "50000000" })).status, 413);
+  const list = await mcp(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }));
+  assert.equal(list.status, 200);
+  assert.match(await list.text(), /"tools"/);
 });

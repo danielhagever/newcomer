@@ -46,3 +46,14 @@ test("city lookup: 426 realistic inputs land on the right city, and only real mi
   assert.equal(CASES.length, 426);
   assert.deepEqual(wrong, []);
 });
+
+test("a city typed as one of Object's own names ('constructor', '__proto__') is not found, not a crash", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ results: [] }), { headers: { "content-type": "application/json" } })) as typeof fetch;
+  try {
+    for (const city of ["Constructor", "__proto__", "Austin, __proto__", "__proto__, Texas", "St constructor, constructor", "constructor, us", "toString, valueOf"])
+      assert.equal(await cityCenter(memoryKV().kv, new Budget(48), city), null, city);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

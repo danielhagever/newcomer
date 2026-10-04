@@ -88,6 +88,8 @@ const ENDONYMS: Record<string, string> = {
   eire: "Ireland", mexico: "Mexico", "great britain": "United Kingdom", britain: "United Kingdom", turkey: "Turkiye",
   uae: "United Arab Emirates", "czech republic": "Czechia", holland: "Netherlands",
 };
+// Typed words are looked up in these tables, so they must not inherit Object's own names ("constructor", "__proto__").
+for (const t of [US_STATES, OTHER_REGIONS, COUNTRY_WORDS, ALIASES, US_AP, ENDONYMS]) Object.setPrototypeOf(t, null);
 const fold = (s: unknown) => String(s ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
 // What a region word can mean: "tx" Texas, "on" Ontario, "wa" Washington or Western Australia.
 const regionNames = (part: string) =>
