@@ -86,7 +86,7 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 149 such inputs are recorded in test/note-fixtures.json):
+// live answers for 160 such inputs are recorded in test/note-fixtures.json):
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
@@ -104,7 +104,10 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 //   ("Furiosa: A Mad Max Saga", "The Lost World: Jurassic Park", "War for the Planet of the Apes"): "The Mandalorian
 //   (Star Wars)" is not Lego Star Wars: The Mandalorian, and "Amy (Winehouse documentary)" is not Amy Winehouse. A
 //   note holding the whole name plus words is a fuller name, not a subtitle ("Amy (Amy Winehouse)" is Amy, 2015),
-//   unless it adds a number ("Toy Story (Toy Story 3)", "(The Hunger Games: Mockingjay Part 1)");
+//   unless it adds a number ("Toy Story (Toy Story 3)", "(The Hunger Games: Mockingjay Part 1)"). Linking words
+//   ("to", "in", "presents") and part words ("Part", "Vol.") are skipped: "Back to the Future (Part 2)" is Back to
+//   the Future Part II, "Toy Story (Part 3)" Toy Story 3, "Fast & Furious (Hobbs & Shaw)" Fast & Furious Presents:
+//   Hobbs & Shaw. A title holding the name and the note that isn't taken is offered first under "Not it?";
 // - "aka" before the note says it's another name, so then an act may take it too ("Ye (aka Kanye West)");
 // - the name alone, among entries that don't hold the note's words; a year in the note picks among the near names
 //   holding the whole name, by Qloo's disambiguation ("Dune (2021 film)"; "The Lord of the Rings (2001)" is The
@@ -135,14 +138,15 @@ export interface Ranked {
 // Words that only say what kind of thing it is; a note made of them (and years) is never another name ("Wednesday
 // (band)" is not The Band).
 const KIND = new Set("band group rapper singer songwriter musician artist act dj producer duo trio composer film movie series show tv sitcom documentary docuseries miniseries anime cartoon podcast book novel game album song".split(" "));
-const LINKS = new Set(["for", "from", "to", "in", "on", "at", "with", "vs", "versus"]);
+const LINKS = new Set(["for", "from", "to", "in", "on", "at", "with", "vs", "versus", "presents"]);
 // Words that mark a sequel or a part ("Vol. 3", "Part II").
 const PART = new Set(["part", "pt", "vol", "volume", "episode", "ep", "chapter", "ch"]);
 // "aka" before a note says it's another name.
 const AKA = /^\s*(?:a\.?\s?k\.?\s?a\.?|also known as|known as)\s+/i;
 // What comes right after the given words at the start of a title: a separator (":", "-"), a linking word ("and the",
 // "of the"), a number or part word, another word, or nothing; null when the title doesn't start with those words.
-function after(title: string, ws: string[]): "sep" | "link" | "number" | "word" | "end" | null {
+function after(title: string, given: string[]): "sep" | "link" | "number" | "word" | "end" | null {
+  const ws = given.filter((w) => !SMALL.has(w) && !LINKS.has(w)); // "Back to the Future" is back, future
   const tokens = title.match(/[^\s:\u2013\u2014-]+|[:\u2013\u2014-]/g) ?? [];
   let k = 0;
   for (let i = 0; i < tokens.length; i++) {
@@ -179,11 +183,8 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   const isArtist = (e: Entity) => e.types.includes("urn:entity:artist");
   // The name alone, among entries that don't hold the note's words.
   const r = rankTyped(found.filter((e) => !holdsNote(e)), bare);
-  // When an entry is named exactly the name, that entry wins over another title named in the note, which is offered
-  // instead ("Better Call Saul (Breaking Bad)", "Fuller House (Full House)", "Chicago P.D. (Chicago Fire)"; so
-  // "Fast & Furious (Fast Five)" is the 2009 film, with Fast Five offered), and a title must start with the name,
-  // small words aside ("The Fast and the Furious: Tokyo Drift"), or be made of only the name's and the note's words
-  // ("The Lost World: Jurassic Park"): "The Mandalorian (Star Wars)" is not Lego Star Wars: The Mandalorian.
+  // When an entry is named exactly the name (see the header), it wins over a title named in the note, and a title
+  // must continue the name or start with the note (below).
   // A name one letter off (two in a long name) counts as named too ("Better Call Saull (Breaking Bad)" is still
   // Better Call Saul).
   const named_ = !!r && (r.match !== "closest" || typoDistance(squashed(r.pick.name), squashed(bare)) <= (squashed(bare).length > 10 ? 2 : 1));
@@ -193,7 +194,8 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   // Games (The Hunger Games: Mockingjay Part 1)").
   const fuller = named.every((w) => noteWords.some((x) => sameWord(w, x))) && !told.some((w) => NUMBER.has(w));
   // A title must hold the note's words that aren't kind words ("Batman (movie)" is not Batman: The Movie).
-  const titleWords = told.filter((w) => !KIND.has(w));
+  // Part words only mark the number ("Toy Story (Part 3)" is Toy Story 3).
+  const titleWords = told.filter((w) => !KIND.has(w) && !PART.has(w));
   const holdsExactly = (e: Entity, ws: string[]) => !!ws.length && ws.every((w) => words(e.name).some((x) => sameWord(w, x)));
   // Linking words don't count in a title ("War for the Planet of the Apes").
   // Next to an entry named exactly the name, a title must continue the name after a separator, a linking word or a
@@ -204,7 +206,8 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   const subtitle = (e: Entity) => ["sep", "link", "number"].includes(after(e.name, named) ?? "");
   const spinOff = (e: Entity) => ["sep", "link"].includes(after(e.name, noteLead) ?? "");
   const startsWithName = (e: Entity) => after(e.name, named) !== null;
-  const titled = found.filter((e) => !isArtist(e) && holdsExactly(e, titleWords) && holdsExactly(e, named) && (!named_ || (!fuller && (subtitle(e) || spinOff(e)))));
+  const held = found.filter((e) => !isArtist(e) && holdsExactly(e, titleWords) && holdsExactly(e, named));
+  const titled = held.filter((e) => !named_ || (!fuller && (subtitle(e) || spinOff(e))));
   if (titled.length) {
     const near = (e: Entity) => share(words(input), words(e.name)) + share(words(e.name), words(input));
     const pick = titled.map((e, i) => ({ e, i, s: near(e) })).sort((x, y) => y.s - x.s || x.i - y.i)[0].e;
@@ -228,7 +231,8 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
     const year = years(noted);
     const said = year.length ? r.list.filter((e) => holds(e, named) && years(e.disambiguation).some((y) => year.includes(y))) : [];
     if (said.length) return { ...r, pick: said[0], match: "closest", list: [said[0], ...r.list.filter((e) => e !== said[0])], note: "year" };
-    const offer = otherPick && !r.list.includes(otherPick) ? [otherPick] : [];
+    // A title named in the note, or one holding the name and the note that wasn't taken, is offered first.
+    const offer = [...(otherPick ? [otherPick] : []), ...held].filter((e, i, a) => a.indexOf(e) === i && e !== r.pick && !r.list.includes(e));
     return { ...r, match: r.match === "exact" ? "closest" : r.match, list: [r.pick, ...offer, ...r.list.filter((e) => e !== r.pick)], offered: (e) => offer.includes(e) || r.offered(e), note: "name", searchName: r.match === "closest" || year.length > 0 };
   }
   return null;

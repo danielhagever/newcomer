@@ -154,6 +154,18 @@ export const T = [
   ["Guardians of the Galaxy (Guardians of the Galaxy Vol. 3)", "movie", (l) => /vol(\.|ume) 3/i.test(l)],
   ["The Hunger Games (The Hunger Games: Mockingjay Part 1)", "movie", (l) => /mockingjay.*part 1\b/i.test(l)],
   ["The Godfather (The Godfather Part II)", "movie", (l) => /godfather part ii( \(|$)/i.test(l)],
+  // pass 11 (written before recording): names holding linking words, "Name Presents: Note", part words not in the title
+  ["Back to the Future (Part 2)", "movie", (l) => /^back to the future part ii( \(|$)/i.test(l)],
+  ["Back to the Future (Part 3)", "movie", (l) => /^back to the future part iii( \(|$)/i.test(l)],
+  ["Men in Black (2)", "movie", (l) => /^men in black (ii|2)( \(|$)/i.test(l)],
+  ["Men in Black (III)", "movie", (l) => /^men in black (iii|3)( \(|$)/i.test(l)],
+  ["How to Train Your Dragon (Hidden World)", "movie", (l) => /hidden world/i.test(l)],
+  ["A Nightmare on Elm Street (Dream Warriors)", "movie", (l) => /dream warriors/i.test(l)],
+  ["Night at the Museum (Smithsonian)", "movie", (l) => /smithsonian/i.test(l)],
+  ["Fast & Furious (Hobbs & Shaw)", "movie", (l) => /hobbs & shaw/i.test(l)],
+  ["Toy Story (Part 3)", "movie", (l) => /^toy story 3( \(|$)/i.test(l)],
+  ["Frozen (Part 2)", "movie", (l) => /^frozen (ii|2)( \(|$)/i.test(l)],
+  ["Kill Bill (Part 2)", "movie", (l) => /vol(\.|ume) 2/i.test(l)],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],
