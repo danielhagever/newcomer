@@ -790,3 +790,30 @@ test("a note in brackets: a subtitle, a year, or set aside, with the name search
     m.restore();
   }
 });
+
+test("a noted name is searched a second time only while the request has calls to spare", async () => {
+  const asked: string[] = [];
+  const m = mockFetch((c) => {
+    if (qloo(c) && c.path === "/search") {
+      asked.push(c.params.get("query") ?? "");
+      return { body: { results: c.params.get("query") === "Succession" ? [{ entity_id: UUID(12), name: "Succession", types: ["urn:entity:tv_show"] }] : [] } };
+    }
+    if (qloo(c) && c.path === "/v2/tags") return { body: { results: { tags: [] } } };
+    return standardQloo()(c);
+  });
+  try {
+    const run = async (left: number) => {
+      asked.length = 0;
+      const budget = new Budget(48);
+      budget.used = 48 - left;
+      return matchNeighborhoods(ENV(memoryKV().kv), budget, "Austin, Texas", [{ name: "Succession (TV series)", kind: "tv_show" as const }, { name: "jazz", kind: "tag" as const }]).catch((e) => e);
+    };
+    const fresh = await run(48);
+    assert.equal(fresh.resolved?.[0]?.as, "Succession");
+    assert.deepEqual(asked.slice(0, 2), ["Succession (TV series)", "Succession"]);
+    await run(22);
+    assert.deepEqual(asked.filter((a) => a.startsWith("Succession")), ["Succession (TV series)"], "nearly spent: no second search");
+  } finally {
+    m.restore();
+  }
+});

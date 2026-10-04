@@ -121,19 +121,22 @@ const choice = (e: Entity): Choice => ({ id: e.id, name: label(e), type: TYPE_WO
 
 const term = (it: Interest) => it.query ?? it.name;
 
+const SPARE_FOR_NAMES = 20;
+
 async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Resolved | null> {
   const found = await q.search(term(it), type, 5);
   let ranked = rankNames(found, term(it));
-  // A note in brackets that told nothing: the name alone is searched too ("Succession (TV series)" found only
-  // "Scream: The TV Series" live).
-  if (withoutNote(term(it)) !== term(it) && (!ranked || ranked.note === "set aside"))
+  // With a note in brackets, the name alone is searched too when that may find a better entry (see Ranked), but
+  // only while the request has calls to spare for the map and the area names (measured: 8 films with a note
+  // used 41 of 44 and left 3 areas unnamed).
+  if (withoutNote(term(it)) !== term(it) && (!ranked || ranked.searchName) && q.budget.left() > SPARE_FOR_NAMES)
     ranked = rankNames(together(found, await q.search(withoutNote(term(it)), type, 5)), term(it));
   if (!ranked) return null;
   const { pick, match } = ranked;
   let others = ranked.list.filter((e) => e.id !== pick.id && ranked.offered(e));
   // The kind was the model's guess ("Dune" as a book): when the match is uncertain, offer the same
   // name in every kind too, so the person can pick the film.
-  if (match !== "exact" && type) {
+  if (match !== "exact" && type && q.budget.left() > SPARE_FOR_NAMES) {
     const any = rankNames(await q.search(withoutNote(term(it)), undefined, 5).catch(() => []), term(it));
     const anyKind = (any?.list ?? []).filter((e) => e.id !== pick.id && any!.offered(e) && !others.some((o) => o.id === e.id));
     others = [...others.slice(0, 2), ...anyKind.slice(0, 3), ...others.slice(2)];

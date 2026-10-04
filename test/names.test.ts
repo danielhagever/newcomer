@@ -2,7 +2,8 @@
 // with Booker; its venue and list cases don't apply here and are skipped). Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rankNames, withoutNote } from "../src/names.ts";
+import { rankNames, together, withoutNote } from "../src/names.ts";
+import { readFileSync } from "node:fs";
 // @ts-ignore: plain JavaScript table
 import cases from "./name-cases.mjs";
 
@@ -73,4 +74,26 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Dune [2021]"), "Dune");
   assert.equal(withoutNote("(TV series)"), "(TV series)");
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
+});
+
+test("notes in brackets on Qloo's live answers: 44 realistic inputs get the entry a reasonable person expects", async () => {
+  const { T } = await import("./note-cases.mjs" as string);
+  const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
+  const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
+  const wrong: string[] = [];
+  let searches = 0;
+  for (const [input, kind, want] of T) {
+    // The same flow as resolveEntity: the whole text, then the name alone when that may find a better entry.
+    const whole = F[`${kind}|${input}`];
+    let r = rankNames(whole, input);
+    searches++;
+    if (withoutNote(input) !== input && (!r || r.searchName)) {
+      r = rankNames(together(whole, F[`${kind}|${withoutNote(input)}`]), input);
+      searches++;
+    }
+    const got = r ? show(r.pick) : "none";
+    if (!want(got)) wrong.push(`${input} -> ${got}`);
+  }
+  assert.deepEqual(wrong, []);
+  assert.ok(searches <= 56, `${searches} Qloo searches for 44 names`);
 });
