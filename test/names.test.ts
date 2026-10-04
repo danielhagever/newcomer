@@ -59,6 +59,9 @@ const NOTES: [string, any[], string][] = [
   ["Yasiin Bey (Mos Def)", [art("Mos Def")], "none"], // never another name for an act (pass 5); live, the name alone finds Yasiin Bey
   ["La Casa de Papel (Money Heist)", [film("Money Heist", "2017,2021")], "Money Heist (2017,2021) closest"],
   ["Moonsprout (indie rock band)", [art("Indie Rock Allstars")], "none"],
+  // A title starts with the name with small words aside ("The Fast and the Furious" starts with "Fast & Furious"),
+  // even next to an entry named exactly the name (Qloo's real titles).
+  ["Fast & Furious (Tokyo)", [film("Fast & Furious", "2009"), film("The Fast and the Furious: Tokyo Drift", "2006")], "The Fast and the Furious: Tokyo Drift (2006) closest"],
   // A one-word note is never the name of another title: "Phoenix" is the actor here, though a 2014 film is named that.
   ["Joker (Phoenix)", [film("Joker", "2019"), film("Phoenix", "2014")], "Joker (2019) closest"],
   // Nothing before the note, or nothing like it: no guess.
@@ -66,7 +69,7 @@ const NOTES: [string, any[], string][] = [
   ["Nobody Real (TV series)", [film("Succession")], "none"],
 ];
 
-test("a note in brackets at the end picks which one, and the pick is only ever a closest match", () => {
+test("a note in brackets at the end picks which one; unless the whole text is a name, the pick is only a closest match", () => {
   const wrong = NOTES.filter(([typed, found, want]) => label(rankNames(found, typed)) !== want).map(([typed, found]) => `${typed} -> ${label(rankNames(found, typed))}`);
   assert.deepEqual(wrong, []);
 });
@@ -78,7 +81,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 122 realistic inputs get the entry a reasonable person expects", async () => {
+test("notes in brackets on Qloo's live answers: 132 realistic inputs get the entry a reasonable person expects", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -97,5 +100,13 @@ test("notes in brackets on Qloo's live answers: 122 realistic inputs get the ent
     if (!want(got)) wrong.push(`${input} -> ${got}`);
   }
   assert.deepEqual(wrong, []);
-  assert.ok(searches <= 154, `${searches} Qloo searches for 122 names`);
+  assert.ok(searches <= 169, `${searches} Qloo searches for 132 names`);
+});
+
+test("when the exact name wins, the title named in the note is offered first under Not it? (Qloo's live answers)", () => {
+  const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
+  for (const [input, kind, offered] of [["Fast & Furious (Fast Five)", "movie", "Fast Five"], ["Better Call Saul (Breaking Bad)", "tv_show", "Breaking Bad"], ["Fuller House (Full House)", "tv_show", "Full House"]]) {
+    const r = rankNames(together(F[`${kind}|${input}`], F[`${kind}|${withoutNote(input)}`]), input)!;
+    assert.equal(r.list.filter((e) => e !== r.pick && r.offered(e))[0]?.name, offered, input);
+  }
 });

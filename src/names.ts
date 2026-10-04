@@ -1,4 +1,4 @@
-// Names typed by a person, matched to what Qloo's search returned (ported from Booker, where 463 realistic
+// Names typed by a person, matched to what Qloo's search returned (ported from Booker, where 472 realistic
 // inputs and 60 review passes pinned these rules). An exact name is preferred; otherwise a candidate is used
 // only if it resembles what was typed, near names are ranked by how close they are, and "Not it?" offers only
 // close names.
@@ -86,19 +86,21 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 122 such inputs are recorded in test/note-fixtures.json):
+// live answers for 132 such inputs are recorded in test/note-fixtures.json):
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
 //   Bourdain: Parts Unknown; "Batman (movie)" is not Batman: The Movie, "Interstellar (Nolan)" not Interstellar:
 //   Nolan's Odyssey). Not for acts: an act holding both names is a collaboration ("Mos Def (Yasiin Bey & Marvin Gaye)");
-// - the note as the exact name of one title ("Indiana Jones (Raiders of the Lost Ark)", "Fast & Furious (Fast
-//   Five)", "La Casa de Papel (Money Heist)"), for a full name of two words or more that aren't kind words, and
+// - the note as the exact name of one title ("Indiana Jones (Raiders of the Lost Ark)", "La Casa de Papel (Money
+//   Heist)"), for a full name of two words or more that aren't kind words, and
 //   never for an act: an act's note is as often a hometown that is also a band's name ("Moonsprout (New England)"),
 //   so "Ye (Kanye West)" is not found rather than guessed;
-// - when an entry is named exactly the name, the note may only continue it: a title must start with the name
-//   ("The Mandalorian (Star Wars)" is not Lego Star Wars: The Mandalorian), and a title named in the note must share
-//   a word with the name and add one ("Fast Five"), never name a parent ("Better Call Saul (Breaking Bad)");
+// - when an entry is named exactly the name, it wins over a title named in the note, which is offered first under
+//   "Not it?" ("Better Call Saul (Breaking Bad)", "Chicago P.D. (Chicago Fire)", so also "Fast & Furious (Fast
+//   Five)" is the 2009 film), and a title must start with the name, small words aside ("The Fast and the Furious:
+//   Tokyo Drift"), or be made of only the name's and the note's words ("The Lost World: Jurassic Park"): "The
+//   Mandalorian (Star Wars)" is not Lego Star Wars: The Mandalorian;
 // - the name alone, among entries that don't hold the note's words; a year in the note picks among the near names
 //   holding the whole name, by Qloo's disambiguation ("Dune (2021 film)"; "The Lord of the Rings (2001)" is The
 //   Fellowship of the Ring; "Spider-Man (2002 film)" is not Spider (2002)); "Dune (Part One)" is Dune, not Dune:
@@ -147,18 +149,19 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   const isArtist = (e: Entity) => e.types.includes("urn:entity:artist");
   // The name alone, among entries that don't hold the note's words.
   const r = rankTyped(found.filter((e) => !holdsNote(e)), bare);
-  // When an entry is named exactly that, the note may only continue the name: a title must start with it ("Star
-  // Wars (Episode 5)" is Episode V, but "The Mandalorian (Star Wars)" is not Lego Star Wars: The Mandalorian), and
-  // another title named in the note must share a word with it and add one ("Fast & Furious (Fast Five)"), never
-  // name a parent ("Better Call Saul (Breaking Bad)") or a part of the name ("Fear the Walking Dead (The Walking Dead)").
+  // When an entry is named exactly the name, that entry wins over another title named in the note, which is offered
+  // instead ("Better Call Saul (Breaking Bad)", "Fuller House (Full House)", "Chicago P.D. (Chicago Fire)"; so
+  // "Fast & Furious (Fast Five)" is the 2009 film, with Fast Five offered), and a title must start with the name,
+  // small words aside ("The Fast and the Furious: Tokyo Drift"), or be made of only the name's and the note's words
+  // ("The Lost World: Jurassic Park"): "The Mandalorian (Star Wars)" is not Lego Star Wars: The Mandalorian.
   const named_ = !!r && r.match !== "closest";
-  const noteWords = words(noted).filter((w) => !SMALL.has(w));
-  const continues = told.length > 0 && told.length < noteWords.length;
   // A title must hold the note's words that aren't kind words ("Batman (movie)" is not Batman: The Movie).
   const titleWords = told.filter((w) => !KIND.has(w));
   const holdsExactly = (e: Entity, ws: string[]) => !!ws.length && ws.every((w) => words(e.name).some((x) => sameWord(w, x)));
-  const startsWithName = (e: Entity) => ` ${nameKey(e.name)} `.startsWith(` ${nameKey(bare)} `);
-  const titled = found.filter((e) => !isArtist(e) && holdsExactly(e, titleWords) && holdsExactly(e, named) && (!named_ || startsWithName(e)));
+  const lead = (e: Entity) => words(e.name).filter((w) => !SMALL.has(w));
+  const startsWithName = (e: Entity) => named.every((w, i) => i < lead(e).length && sameWord(w, lead(e)[i]));
+  const onlyNameAndNote = (e: Entity) => lead(e).every((x) => [...named, ...titleWords].some((w) => sameWord(w, x)));
+  const titled = found.filter((e) => !isArtist(e) && holdsExactly(e, titleWords) && holdsExactly(e, named) && (!named_ || startsWithName(e) || onlyNameAndNote(e)));
   if (titled.length) {
     const near = (e: Entity) => share(words(input), words(e.name)) + share(words(e.name), words(input));
     const pick = titled.map((e, i) => ({ e, i, s: near(e) })).sort((x, y) => y.s - x.s || x.i - y.i)[0].e;
@@ -170,18 +173,20 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   }
   // The note names one title exactly ("Indiana Jones (Raiders of the Lost Ark)", "La Casa de Papel (Money Heist)"):
   // a full name of two words or more, not kind words, never an act (an act's note is as often a hometown that is
-  // also a band's name: "Moonsprout (New England)"). With nothing like the name found yet, the name alone is
-  // searched first ("Better Call Saul" may not be among the whole text's answers).
-  const full = noteWords.filter((w) => !KIND.has(w) && !/^\d{4}$/.test(w));
-  const other = full.length >= 2 && (!named_ || continues) ? rankTyped(found.filter((e) => !isArtist(e)), noted) : null;
-  if (other && other.match !== "closest") return { ...other, match: "closest", note: "other name", searchName: !r };
+  // also a band's name: "Moonsprout (New England)"). The name alone is searched first, since an entry named exactly
+  // that wins and may not be among the whole text's answers ("Fast & Furious (Fast Five)" found Fast Five only).
+  const full = words(noted).filter((w) => !SMALL.has(w) && !KIND.has(w) && !/^\d{4}$/.test(w));
+  const other = full.length >= 2 ? rankTyped(found.filter((e) => !isArtist(e)), noted) : null;
+  const otherPick = other && other.match !== "closest" ? other.pick : null;
+  if (otherPick && !named_) return { ...other!, match: "closest", note: "other name", searchName: true };
   if (r) {
     // A year picks among the near names by Qloo's disambiguation: "The Lord of the Rings (2001)" is The Fellowship of
     // the Ring, not the 1978 film named exactly that.
     const year = years(noted);
     const said = year.length ? r.list.filter((e) => holds(e, named) && years(e.disambiguation).some((y) => year.includes(y))) : [];
     if (said.length) return { ...r, pick: said[0], match: "closest", list: [said[0], ...r.list.filter((e) => e !== said[0])], note: "year" };
-    return { ...r, match: r.match === "exact" ? "closest" : r.match, note: "name", searchName: r.match === "closest" || year.length > 0 };
+    const offer = otherPick && !r.list.includes(otherPick) ? [otherPick] : [];
+    return { ...r, match: r.match === "exact" ? "closest" : r.match, list: [r.pick, ...offer, ...r.list.filter((e) => e !== r.pick)], offered: (e) => offer.includes(e) || r.offered(e), note: "name", searchName: r.match === "closest" || year.length > 0 };
   }
   return null;
 }

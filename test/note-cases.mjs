@@ -106,7 +106,9 @@ export const T = [
   ["Rocky (Rocky IV)", "movie", (l) => /^rocky iv( \(|$)/i.test(l)],
   ["Toy Story (Toy Story 3)", "movie", (l) => /^toy story 3( \(|$)/i.test(l)],
   ["Indiana Jones (Raiders of the Lost Ark)", "movie", (l) => /raiders of the lost ark/i.test(l)],
-  ["Fast & Furious (Fast Five)", "movie", (l) => /^fast five( \(|$)/i.test(l)],
+  // Policy (pass 8): an entry named exactly the name wins over a title named in the note, which is offered under
+  // "Not it?" ("Chicago P.D. (Chicago Fire)" has the same shape and means Chicago P.D.).
+  ["Fast & Furious (Fast Five)", "movie", at("fast & furious", "2009")],
   ["Mission: Impossible (Fallout)", "movie", (l) => /fallout/i.test(l)],
   ["The Matrix (Reloaded)", "movie", (l) => /reloaded/i.test(l)],
   ["Pirates of the Caribbean (Dead Man's Chest)", "movie", (l) => /dead man/i.test(l)],
@@ -121,6 +123,17 @@ export const T = [
   ["Logan (X-Men)", "movie", at("logan", "2017")],
   ["Venom (Spider-Man)", "movie", at("venom", "2018")],
   ["Serial (This American Life)", "podcast", only("Serial")],
+  // pass 8 (written before recording): titles that lead with the subtitle; spin-offs sharing words with the parent
+  ["Fast & Furious (Tokyo Drift)", "movie", (l) => /tokyo drift/i.test(l)],
+  ["Jurassic Park (The Lost World)", "movie", (l) => /lost world/i.test(l)],
+  ["Planet of the Apes (Rise)", "movie", (l) => /^rise of the planet of the apes/i.test(l)],
+  ["Star Wars (Rogue One)", "movie", (l) => /^rogue one/i.test(l)],
+  ["Spider-Man (Homecoming)", "movie", (l) => /^spider-man: homecoming/i.test(l)],
+  ["Mad Max (Fury Road)", "movie", (l) => /^mad max: fury road/i.test(l)],
+  ["Fuller House (Full House)", "tv_show", only("Fuller House")],
+  ["Girl Meets World (Boy Meets World)", "tv_show", only("Girl Meets World")],
+  ["That '90s Show (That '70s Show)", "tv_show", (l) => /^that '90s show/i.test(l)],
+  ["Chicago P.D. (Chicago Fire)", "tv_show", (l) => /^chicago p\.?d/i.test(l)],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],
