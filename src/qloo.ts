@@ -70,7 +70,8 @@ export class Qloo {
   env: QlooEnv;
   budget: Budget;
   private gap: number;
-  private nextStart = 0;
+  private last = -Infinity;
+  private queue: Promise<void> = Promise.resolve();
   constructor(env: QlooEnv, budget: Budget) {
     this.env = env;
     this.budget = budget;
@@ -78,12 +79,20 @@ export class Qloo {
     this.gap = env.QLOO_MIN_GAP_MS !== undefined && Number.isFinite(g) && g >= 0 ? g : MIN_GAP_MS;
   }
 
-  // Each call books the next start time when it is made, so calls made together go out in turn.
-  private async turn(): Promise<void> {
-    const now = Date.now();
-    const at = Math.max(now, this.nextStart);
-    this.nextStart = at + this.gap;
-    if (at > now) await new Promise((r) => setTimeout(r, at - now));
+  // Calls take turns: each goes out at least `gap` after the previous one was sent (`last` is set at the
+  // send, in get()). The clock is checked again after each wait, because a timer can fire a few ms early
+  // or late (Node times it from a cached loop clock); three checks at most. (Booking start times ahead let
+  // calls go out under 340 ms apart, which Qloo's limit can refuse.)
+  private turn(): Promise<void> {
+    const mine = this.queue.then(async () => {
+      for (let i = 0; i < 3; i++) {
+        const wait = this.last + this.gap - Date.now();
+        if (wait <= 0) break;
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    });
+    this.queue = mine;
+    return mine;
   }
 
   // One bounded retry: a call from another search at the same moment can still meet a 429.
@@ -95,11 +104,13 @@ export class Qloo {
     const t = Date.now(); // the time Qloo took, not the wait for a turn
     let res: Response;
     try {
-      res = await fetchWithTimeout(
+      const sent = fetchWithTimeout(
         `${base}${path}?${new URLSearchParams(params)}`,
         { headers: { "X-Api-Key": this.env.QLOO_API_KEY, accept: "application/json" } },
         TIMEOUT_MS,
       );
+      this.last = Date.now(); // before the next call's turn runs: it was queued after this one
+      res = await sent;
     } catch (e) {
       this.calls.push({ path, params, status: 0, ms: Date.now() - t, count: 0 });
       if ((e as Error)?.name === "TimeoutError") throw new QlooError("Qloo took too long to answer. Please try again.", 504);

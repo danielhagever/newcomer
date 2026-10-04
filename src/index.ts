@@ -26,11 +26,12 @@ const failure = (e: unknown) => {
 };
 
 // Bump whenever the pipeline or the result format changes, so no one gets yesterday's logic.
-const CACHE_VERSION = 12;
+const CACHE_VERSION = 13;
 
 // Returns the result and whether it came from the day's cache (the page says so: the timings in
-// "How we know" are from the run that made it).
-async function cachedMatch(env: Env, budget: Budget, city: string, interests: Interest[]): Promise<MatchResult & { cached?: boolean }> {
+// "How we know" are from the run that made it). Only a new search passes the hourly gate: a saved answer
+// costs no Qloo calls, so it doesn't count.
+async function cachedMatch(env: Env, budget: Budget, city: string, interests: Interest[], gate: () => Promise<boolean>): Promise<MatchResult & { cached?: boolean }> {
   const key = `match${CACHE_VERSION}:` + (await sha(JSON.stringify([city.toLowerCase(), interests.map((i) => [i.name.toLowerCase(), i.query?.toLowerCase() ?? "", i.kind ?? "", i.id ?? ""])])));
   if (budget.take()) {
     try {
@@ -40,6 +41,7 @@ async function cachedMatch(env: Env, budget: Budget, city: string, interests: In
       // A cache miss is fine.
     }
   }
+  if (!(await gate())) throw new AppError("Too many searches from this address in the last hour (saved answers still work). Please try again later.", 429);
   const r = await matchNeighborhoods(env, budget, city, interests);
   // Results with a failed optional step are shown but not kept, so a hiccup isn't served all day.
   if (!r.degraded && budget.take()) {
@@ -78,7 +80,7 @@ function caveats(r: MatchResult): string {
   const unsure = r.resolved.filter((x) => x.match === "closest" || x.match === "ambiguous");
   const parts = unsure.map(
     (x) =>
-      `"${x.input}" was matched to ${x.as} (${x.match === "closest" ? "closest Qloo match, not an exact name" : "several Qloo entries share this name; the first was used"})${x.alternatives.length ? `; alternatives: ${x.alternatives.map((a) => `${a.name}${a.type && !a.type.startsWith("urn:") ? ` (${a.type})` : ""} [id ${a.id}]`).join(", ")}` : ""}.`,
+      `"${x.input}" was matched to ${x.as} [id ${x.id}] (${x.match === "closest" ? "closest Qloo match, not an exact name" : "several Qloo entries share this name; the first was used"})${x.alternatives.length ? `; alternatives: ${x.alternatives.map((a) => `${a.name}${a.type && !a.type.startsWith("urn:") ? ` (${a.type})` : ""} [id ${a.id}]`).join(", ")}` : ""}.`,
   );
   if (r.unresolved.length) parts.push(`Not found in Qloo: ${r.unresolved.join(", ")}.`);
   return parts.join(" ");
@@ -91,7 +93,7 @@ function buildServer(env: Env, req: Request): McpServer {
     {
       title: "Find neighborhoods that share your taste",
       description:
-        "For someone moving to a city: ranks the city's neighborhoods by how strongly the people there share the person's tastes (Qloo heatmap), names the places that show it, and drafts a two-day scouting weekend. Pass each interest by its English name as Qloo knows it, accents kept ('Fauda', not 'פאודה'; 'Björk'), with a kind (artist, movie, tv_show, book, podcast, video_game, brand, place, or tag for cuisines, activities and genres). If a name was only a closest match, or several Qloo entries share it, the result lists alternatives with their Qloo IDs: ask the person which one they meant, then call again with that id on the interest.",
+        "For someone moving to a city: ranks the city's neighborhoods by how strongly the people there share the person's tastes (Qloo heatmap), names the places that show it, and drafts a two-day scouting weekend. Pass each interest by its English name as Qloo knows it, accents kept ('Fauda', not 'פאודה'; 'Björk'), with a kind (artist, movie, tv_show, book, podcast, video_game, brand, place, or tag for cuisines, activities and genres). If a name was only a closest match, or several Qloo entries share it, the answer says which entry was used, with its Qloo id, and lists any alternatives with theirs: ask the person whether it's the one they meant; to use another, call again with that id on the interest. Send one tool call per request.",
       inputSchema: z.object({
         city: z.string().min(2).max(MAX_CITY).describe("City the person is moving to, with its state or country, e.g. 'Austin, Texas'"),
         interests: z
@@ -109,11 +111,11 @@ function buildServer(env: Env, req: Request): McpServer {
     },
     async ({ city, interests }) => {
       const budget = new Budget(REQUEST_BUDGET);
-      if (!(await allow(req, "mcp", LIMITS.mcp, budget)))
-        return { content: [{ type: "text", text: "Too many searches from this address in the last hour. Please try again later." }], isError: true };
       try {
         const clean = cleanInterests(interests);
-        const r = await cachedMatch(env, budget, cleanCity(city), clean);
+        const where = cleanCity(city);
+        if (where.length < 2 || !clean.length) throw new AppError("Please give a city and at least one thing the person loves.", 400);
+        const r = await cachedMatch(env, budget, where, clean, () => allow(req, "mcp", LIMITS.mcp, budget));
         const s = summary(r);
         const notes = caveats(r);
         return { content: [{ type: "text", text: notes ? `${s}\n\n${notes}` : s }], structuredContent: { spoken: s, ...r } };
@@ -128,7 +130,16 @@ function buildServer(env: Env, req: Request): McpServer {
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) return createMcpHandler(() => buildServer(env, req)).fetch(req);
+    if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) {
+      // One tool call per HTTP request: a JSON-RPC batch of several would run them side by side, each with its own
+      // 48-call budget and Qloo pacing, so together they could break both.
+      if (req.method === "POST") {
+        const body = await req.clone().json().catch(() => null);
+        if (Array.isArray(body) && body.filter((m) => m?.method === "tools/call").length > 1)
+          return json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Send one tool call per request." } }, 400);
+      }
+      return createMcpHandler(() => buildServer(env, req)).fetch(req);
+    }
     if (url.pathname === "/favicon.ico") return Response.redirect(new URL("/favicon.svg", url).toString(), 301);
     if (url.pathname === "/api/status") return json({ qloo: !!env.QLOO_API_KEY });
     if (url.pathname === "/api/parse" && req.method === "POST") {
@@ -145,16 +156,20 @@ export default {
       let all = cleanInterests(body?.interests, MAX_PARSED);
       if (city.length < 2 || (!all.length && !text)) return json({ error: "Please give a city and at least one thing you love." }, 400);
       const budget = new Budget(REQUEST_BUDGET);
-      if (!(await allow(req, "match", LIMITS.match, budget))) return json({ error: "Too many searches from this address in the last hour. Please try again later." }, 429);
+      // A search counts once against the hourly limit: when its text is parsed first (a Workers AI call), or
+      // when it isn't in the day's cache.
+      let counted = false;
+      const gate = async () => counted || (counted = await allow(req, "match", LIMITS.match, budget));
       try {
         if (!all.length) {
+          if (!(await gate())) return json({ error: "Too many searches from this address in the last hour. Please try again later." }, 429);
           budget.take(); // the Workers AI call may count as a subrequest too
           all = await parseInterests(env.AI, text);
         }
         // A search uses the first 8; the rest are named, not silently dropped.
         const interests = all.slice(0, MAX_INTERESTS);
         const leftOut = all.slice(MAX_INTERESTS).map((i) => i.name);
-        const r = await cachedMatch(env, budget, city, interests);
+        const r = await cachedMatch(env, budget, city, interests, gate);
         return json({ ...r, summary: summary(r), interests, leftOut });
       } catch (e) {
         const f = failure(e);

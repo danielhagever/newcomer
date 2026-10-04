@@ -728,3 +728,26 @@ test("squares Qloo names alike merge, and the entry states its best square's num
     m.restore();
   }
 });
+
+test("interests are matched by Booker's name rules: near names ranked by closeness, no fragments offered, no one-word coincidences", async () => {
+  const results: Record<string, any[]> = {
+    "Tom Pety": [{ entity_id: UUID(1), name: "Tom Waits", types: ["urn:entity:artist"] }, { entity_id: UUID(2), name: "Tom Petty", types: ["urn:entity:artist"] }],
+    "Shakey Graves": [{ entity_id: UUID(3), name: "Shakey Graves", types: ["urn:entity:artist"] }, { entity_id: UUID(4), name: "Graves", types: ["urn:entity:artist"] }],
+    "Nobody Real Band Xyz": [{ entity_id: UUID(5), name: "The Band", types: ["urn:entity:artist"] }],
+  };
+  const m = mockFetch((c) => {
+    if (qloo(c) && c.path === "/search") return { body: { results: results[c.params.get("query") ?? ""] ?? [] } };
+    if (qloo(c) && c.path === "/v2/tags") return { body: { results: { tags: [] } } };
+    return standardQloo()(c);
+  });
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", ["Tom Pety", "Shakey Graves", "Nobody Real Band Xyz"].map((name) => ({ name, kind: "artist" as const })));
+    const got = Object.fromEntries(r.resolved.map((x) => [x.input, `${x.as} ${x.match} [${x.alternatives.map((a) => a.name)}]`]));
+    assert.equal(got["Tom Pety"], "Tom Petty closest []", "Tom Waits shares one word of two: not offered");
+    assert.equal(got["Shakey Graves"], "Shakey Graves exact []");
+    assert.equal(got["Nobody Real Band Xyz"], undefined, "one shared word in a long name isn't a match");
+  } finally {
+    m.restore();
+  }
+});

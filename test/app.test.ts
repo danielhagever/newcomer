@@ -113,6 +113,7 @@ test("MCP: a closest match tells the agent the alternatives and their IDs", asyn
     const data = JSON.parse(text.split("\n").find((l) => l.startsWith("data: "))!.slice(6));
     const said = data.result.content[0].text as string;
     assert.match(said, /closest Qloo match/);
+    assert.match(said, /\[id 00000000-0000-4000-8000-00000000000[23]\]/, "the pick's Qloo id is given, so the agent can send it back");
     assert.match(said, /Dune: Part Two \(\w[\w ]*\) \[id 00000000-0000-4000-8000-000000000003\]|Dune: Part Two \[id 00000000-0000-4000-8000-000000000003\]/);
   } finally {
     m.restore();
@@ -214,4 +215,45 @@ test("the one-line answer agrees in number: one runner-up comes next, two come n
 test("a failed search says Stopped, not Done", () => {
   assert.match(page, /failed \? "Stopped"/);
   assert.match(page, /if \(d\.error\) \{ progress\(1, true\)/);
+});
+
+test("only new searches count against the hourly limit; a saved answer is free", async () => {
+  const store = new Map<string, string>();
+  const fake = { match: async (k: Request) => (store.has(k.url) ? new Response(store.get(k.url)) : undefined), put: async (k: Request, v: Response) => void store.set(k.url, await v.text()) };
+  (globalThis as any).caches = { default: fake };
+  const m = mockFetch(qlooOk);
+  try {
+    const kv = memoryKV();
+    const body = (i: number) => ({ city: "Austin, Texas", interests: [{ name: "Phoebe Bridgers", kind: "artist" }, { name: `n${i}`, kind: "tag" }] });
+    for (let i = 0; i < 25; i++) assert.equal((await worker.fetch(post("/api/match", body(1)), env(kv.kv))).status, 200);
+    assert.deepEqual([...store.values()], ["1"], "25 identical searches, one counted");
+    for (let i = 2; i <= 20; i++) await worker.fetch(post("/api/match", body(i)), env(kv.kv));
+    const over = await worker.fetch(post("/api/match", body(21)), env(kv.kv));
+    assert.equal(over.status, 429);
+    assert.match(((await over.json()) as any).error, /saved answers still work/);
+    assert.equal((await worker.fetch(post("/api/match", body(1)), env(kv.kv))).status, 200, "a saved answer still works past the limit");
+  } finally {
+    m.restore();
+    delete (globalThis as any).caches;
+  }
+});
+
+test("MCP: one tool call per request, blank input refused before any count or lookup", async () => {
+  const headers = { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18" };
+  const call = (id: number, args: unknown) => ({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "find_neighborhoods", arguments: args } });
+  const m = mockFetch(qlooOk);
+  try {
+    const batch = await worker.fetch(new Request("https://newcomer.test/mcp", { method: "POST", headers, body: JSON.stringify([call(1, { city: "Austin, Texas", interests: [{ name: "jazz" }] }), call(2, { city: "Chicago, Illinois", interests: [{ name: "jazz" }] })]) }), env());
+    assert.equal(batch.status, 400);
+    assert.match(await batch.text(), /one tool call per request/);
+    const counted = new Map<string, string>();
+    (globalThis as any).caches = { default: { match: async (k: Request) => (counted.has(k.url) ? new Response(counted.get(k.url)) : undefined), put: async (k: Request, v: Response) => void counted.set(k.url, await v.text()) } };
+    const blank = await (await worker.fetch(new Request("https://newcomer.test/mcp", { method: "POST", headers, body: JSON.stringify(call(3, { city: "   ", interests: [{ name: "jazz" }] })) }), env())).text();
+    assert.equal(JSON.parse(blank.split("\n").find((l) => l.startsWith("data: "))!.slice(6)).result.isError, true);
+    assert.equal(counted.size, 0, "a blank city is not counted against the hourly limit");
+    assert.equal(m.calls.length, 0, "and nothing is looked up");
+  } finally {
+    m.restore();
+    delete (globalThis as any).caches;
+  }
 });

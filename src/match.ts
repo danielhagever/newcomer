@@ -9,6 +9,8 @@
 // - every place carries Qloo's own neighborhood name and time-of-day fit.
 
 import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type QlooEnv, type Signals, type Tag } from "./qloo.ts";
+import { nameKey as typedName, rankNames, resembles } from "./names.ts";
+export { resembles };
 import { cityCenter, cellKey, km, namesFor } from "./geo.ts";
 import { AppError, type Budget } from "./limits.ts";
 
@@ -95,30 +97,8 @@ const notFound = (e: unknown) => e instanceof AppError && (e.status === 400 || e
 
 const label = (e: Entity) => (e.disambiguation && normalizeName(e.disambiguation) !== normalizeName(e.name) ? `${e.name} (${e.disambiguation})` : e.name);
 
-// Qloo's search (semantic search above all) always returns something, even for "zzqx". A candidate
-// that isn't the exact name is only accepted if it resembles what was typed: one contains the other,
-// or at least half the typed words appear in it, allowing a typo or two (swapped letters count once).
-const STOP = new Set(["the", "a", "an", "of", "and", "&"]);
-const words = (s: string) => normalizeName(s).replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w && !STOP.has(w));
-function typoDistance(a: string, b: string): number {
-  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
-  for (let i = 1; i <= a.length; i++)
-    for (let j = 1; j <= b.length; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
-    }
-  return d[a.length][b.length];
-}
-export function resembles(typed: string, name: string): boolean {
-  const a = words(typed), b = words(name);
-  if (!a.length || !b.length) return false;
-  const A = a.join(" "), B = b.join(" ");
-  if (A === B || B.includes(A) || A.includes(B)) return true;
-  const close = (w: string) => b.some((x) => x === w || typoDistance(w, x) <= (w.length > 5 ? 2 : w.length > 3 ? 1 : 0));
-  return a.filter(close).length / a.length >= 0.5;
-}
-
+// Qloo's search (semantic search above all) always returns something, even for "zzqx": names are matched
+// and ranked by names.ts (an exact name first, else only a candidate that resembles what was typed).
 // Tags that change the taste map: music genres (jazz), and film/TV/book genres when the word has no
 // place meaning. Activities like bouldering also exist as film subgenres; those go to places only.
 const genre = (t: Tag) => /^urn:tag:(genre|subgenre):/.test(t.id);
@@ -142,17 +122,15 @@ const choice = (e: Entity): Choice => ({ id: e.id, name: label(e), type: TYPE_WO
 const term = (it: Interest) => it.query ?? it.name;
 
 async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Resolved | null> {
-  const found = await q.search(term(it), type, 5);
-  const exact = found.filter((e) => normalizeName(e.name) === normalizeName(term(it)));
-  const list = found.filter((e) => exact.includes(e) || resembles(term(it), e.name));
-  if (!list.length) return null;
-  const pick = exact[0] ?? list[0];
-  const match: Resolved["match"] = exact.length === 1 ? "exact" : exact.length > 1 ? "ambiguous" : "closest";
-  let others = list.filter((e) => e.id !== pick.id);
+  const ranked = rankNames(await q.search(term(it), type, 5), term(it));
+  if (!ranked) return null;
+  const { pick, match } = ranked;
+  let others = ranked.list.filter((e) => e.id !== pick.id && ranked.offered(e));
   // The kind was the model's guess ("Dune" as a book): when the match is uncertain, offer the same
   // name in every kind too, so the person can pick the film.
   if (match !== "exact" && type) {
-    const anyKind = (await q.search(term(it), undefined, 5).catch(() => [])).filter((e) => e.id !== pick.id && resembles(term(it), e.name) && !others.some((o) => o.id === e.id));
+    const any = rankNames(await q.search(term(it), undefined, 5).catch(() => []), term(it));
+    const anyKind = (any?.list ?? []).filter((e) => e.id !== pick.id && any!.offered(e) && !others.some((o) => o.id === e.id));
     others = [...others.slice(0, 2), ...anyKind.slice(0, 3), ...others.slice(2)];
   }
   return {
@@ -176,7 +154,7 @@ async function resolveTag(q: Qloo, it: Interest): Promise<Resolved | null> {
   if (!list.length) return null;
   // An exact name only counts if one of its tags can act (a media keyword alone can't); otherwise the
   // closest tag that can act is used, flagged as closest.
-  const exact = list.filter((t) => normalizeName(t.name) === normalizeName(term(it)) && (placeTag(t) || musicTag(t) || mediaTag(t)));
+  const exact = list.filter((t) => typedName(t.name) === typedName(term(it)) && (placeTag(t) || musicTag(t) || mediaTag(t)));
   const pool = exact.length ? exact : list;
   const forPlaces = pool.find(placeTag);
   // Yoga and skateboarding are also music genres; when the word means an activity or a food, its
