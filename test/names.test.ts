@@ -83,7 +83,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 168 realistic inputs get the entry a reasonable person expects", async () => {
+test("notes in brackets on Qloo's live answers: 181 realistic inputs get the entry a reasonable person expects", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -102,7 +102,7 @@ test("notes in brackets on Qloo's live answers: 168 realistic inputs get the ent
     if (!want(got)) wrong.push(`${input} -> ${got}`);
   }
   assert.deepEqual(wrong, []);
-  assert.ok(searches <= 217, `${searches} Qloo searches for 168 names`);
+  assert.ok(searches <= 237, `${searches} Qloo searches for 181 names`);
 });
 
 test("when the exact name wins, the title named in the note is offered first under Not it? (Qloo's live answers)", () => {
@@ -119,4 +119,13 @@ test("a number word after a part word is searched as a digit (Qloo finds Episode
   assert.equal(forSearch("Kill Bill (Vol. Two)"), "Kill Bill (Vol. 2)");
   assert.equal(forSearch("Fast & Furious (Fast Five)"), "Fast & Furious (Fast Five)");
   assert.equal(forSearch("Part One Records"), "Part One Records");
+});
+
+test("with a note, Not it? offers only entries holding the name, besides the note's own titles (Qloo's live answers)", () => {
+  const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
+  for (const [input, kind] of [["Dune (Part Two)", "movie"], ["The Godfather (Part II)", "movie"], ["It (Chapter Two)", "movie"]]) {
+    const r = rankNames(together(F[`${kind}|${forSearch(input)}`], F[`${kind}|${withoutNote(input)}`]), input)!;
+    const name = withoutNote(input).toLowerCase().replace(/^the /, "");
+    assert.deepEqual(r.list.filter((e) => e !== r.pick && r.offered(e) && !e.name.toLowerCase().includes(name)).map((e) => e.name), [], input);
+  }
 });

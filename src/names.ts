@@ -86,7 +86,7 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 168 such inputs are recorded in test/note-fixtures.json):
+// live answers for 181 such inputs are recorded in test/note-fixtures.json):
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
@@ -110,7 +110,11 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 //   Hobbs & Shaw. A franchise's own words may come before the separator ("Twilight (New Moon)" is The Twilight
 //   Saga: New Moon), the title holding more of the note's words wins ("Star Wars (Episode 1)" is Episode I, not
 //   Rogue One), and kind words in the note hide nothing ("SpongeBob (movie)" is The SpongeBob SquarePants Movie).
-//   A title holding the name and the note that isn't taken is offered first under "Not it?";
+//   A note that is only a number asks for the Nth: the title with that number right after the name ("Shrek (2)" is
+//   Shrek 2), or else the Nth by year from the title named exactly the name ("The Hunger Games (2)" is Catching
+//   Fire). Kind words at the end of a note only say what it is ("(Raiders of the Lost Ark film)"). A title holding the
+//   name and the note that isn't taken is offered first under "Not it?", and otherwise only entries holding the
+//   name are offered ("Dune (Part Two)" isn't offered The Godfather Part II);
 // - "aka" before the note says it's another name, so then an act may take it too ("Ye (aka Kanye West)");
 // - the name alone, among entries that don't hold the note's words; a year in the note picks among the near names
 //   holding the whole name, by Qloo's disambiguation ("Dune (2021 film)"; "The Lord of the Rings (2001)" is The
@@ -171,6 +175,28 @@ function after(title: string, given: string[]): "sep" | "link" | "number" | "wor
   }
   return k === ws.length ? "end" : null;
 }
+// The words of a title after the given words at its start, separators left out; null when it doesn't start with them.
+function wordsAfter(title: string, given: string[]): string[] | null {
+  const ws = given.filter((w) => !SMALL.has(w) && !LINKS.has(w));
+  const rest: string[] = [];
+  let k = 0;
+  for (const token of title.match(/[^\s:\u2013\u2014-]+/g) ?? [])
+    for (const w of words(token)) {
+      if (k < ws.length) {
+        if (SMALL.has(w) || LINKS.has(w)) continue;
+        if (!sameWord(ws[k], w)) return null;
+        k++;
+      } else rest.push(w);
+    }
+  return k === ws.length ? rest : null;
+}
+// Kind words at the end of a note only say what it is ("Raiders of the Lost Ark film").
+function trimKind(s: string): string {
+  let t = s.trim();
+  for (let m = /^(.*\S)\s+(\S+)$/.exec(t); m && words(m[2]).length && words(m[2]).every((w) => KIND.has(w)); m = /^(.*\S)\s+(\S+)$/.exec(t)) t = m[1];
+  return t;
+}
+const yearOf = (e: Entity) => Number(years(e.disambiguation)[0] ?? NaN);
 const years = (s: string | undefined): string[] => s?.match(/\b\d{4}\b/g) ?? [];
 // In a title, a note's word must be there as written, or as its number twin ("2", "II", "Two") or short form.
 const SHORT: Record<string, string> = { pt: "part", vol: "volume", ep: "episode", ch: "chapter" };
@@ -180,10 +206,14 @@ const sameWord = (a: string, b: string) => a === b || (NUMBER.has(a) && NUMBER.g
 export function rankNames(found: Entity[], input: string): Ranked | null {
   const all = rankTyped(found, input);
   const bare = withoutNote(input);
-  if (all?.match === "exact" || bare === input) return all;
-  const aka = AKA.exec(NOTE.exec(input)![1]);
-  const noted = NOTE.exec(input)![1].slice(aka?.[0].length ?? 0);
+  if (bare === input) return all;
   const named = words(bare).filter((w) => !SMALL.has(w));
+  // With a note, "Not it?" offers only entries holding the name, besides the note's own titles ("Dune (Part Two)" isn't
+  // offered The Godfather Part II, which shares "part two").
+  const holdsName = (e: Entity) => named.every((w) => closeTo(w, words(e.name), false));
+  if (all?.match === "exact") return { ...all, offered: (e) => all.offered(e) && holdsName(e) };
+  const aka = AKA.exec(NOTE.exec(input)![1]);
+  const noted = trimKind(NOTE.exec(input)![1].slice(aka?.[0].length ?? 0));
   // The note's words that aren't already in the name ("Chance the Rapper (rapper)" adds nothing).
   const told = words(noted).filter((w) => !SMALL.has(w) && !closeTo(w, named, false));
   const holds = (e: Entity, ws: string[]) => !!ws.length && ws.every((w) => closeTo(w, words(e.name), false));
@@ -220,6 +250,32 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
     return cut > 0 && holdsExactly({ ...e, name: e.name.slice(0, cut) }, named) && after(e.name.slice(cut).replace(/^\s*[:\u2013\u2014-]\s*/, ""), noteLead) !== null;
   };
   const startsWithName = (e: Entity) => after(e.name, named) !== null;
+  // A note that is only a number ("The Hunger Games (2)", "Frozen (Part 2)") asks for the Nth: the title carrying that
+  // number right after the name ("Shrek 2", "Kill Bill: Vol. 2", "Men in Black II"), or else the Nth by year of the
+  // titles starting with the name, counting from the one named exactly that ("The Hunger Games: Catching Fire",
+  // "Harry Potter and the Chamber of Secrets"; not "Mockingjay - Part 2", whose 2 belongs to Mockingjay).
+  const numbers = titleWords.filter((w) => NUMBER.has(w));
+  if (numbers.length === 1 && titleWords.length === 1) {
+    const n = NUMBER.get(numbers[0])! + 1;
+    const numbered = found.filter((e) => {
+      const rest = !isArtist(e) && wordsAfter(e.name, named);
+      const k = rest ? rest.findIndex((w) => !PART.has(w)) : -1;
+      return k >= 0 && sameWord(numbers[0], (rest as string[])[k]);
+    });
+    const anchor = named_ ? r!.pick : null;
+    const since = anchor ? yearOf(anchor) : NaN;
+    const later = found
+      .filter((e) => e !== anchor && !isArtist(e) && startsWithName(e) && !Number.isNaN(yearOf(e)) && (Number.isNaN(since) || yearOf(e) >= since))
+      .map((e, i) => ({ e, i }))
+      .sort((x, y) => yearOf(x.e) - yearOf(y.e) || x.i - y.i)
+      .map((x) => x.e);
+    const series = anchor ? [anchor, ...later] : later;
+    const pick = numbered[0] ?? series[n - 1];
+    if (pick) {
+      const byName = rankTyped(found, bare);
+      return { pick, match: "closest", list: [pick, ...(byName?.list ?? []).filter((e) => e !== pick)], offered: (e) => !!byName?.offered(e) && holdsName(e), note: "title", searchName: !numbered.length && !anchor };
+    }
+  }
   const held = found.filter((e) => !isArtist(e) && holdsExactly(e, titleWords) && holdsExactly(e, named));
   const titled = held.filter((e) => !named_ || (!fuller && (subtitle(e) || spinOff(e) || franchise(e))));
   if (titled.length) {
@@ -232,7 +288,7 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
     // A title that doesn't start with the name, with no entry named exactly that among the answers: the name alone is
     // searched too, since Qloo's search for the whole text can miss it ("The Mandalorian (Star Wars)" found Lego Star
     // Wars: The Mandalorian but not The Mandalorian).
-    return { pick, match: "closest", list: [pick, ...(byName?.list ?? []).filter((e) => e !== pick)], offered: (e) => !!byName?.offered(e), note: "title", searchName: !startsWithName(pick) };
+    return { pick, match: "closest", list: [pick, ...(byName?.list ?? []).filter((e) => e !== pick)], offered: (e) => !!byName?.offered(e) && holdsName(e), note: "title", searchName: !startsWithName(pick) };
   }
   // The note names one title exactly ("Indiana Jones (Raiders of the Lost Ark)", "La Casa de Papel (Money Heist)"):
   // a name of two words or more, not all kind words, never an act (an act's note is as often a hometown that is
@@ -250,7 +306,7 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
     if (said.length) return { ...r, pick: said[0], match: "closest", list: [said[0], ...r.list.filter((e) => e !== said[0])], note: "year" };
     // A title named in the note, or one holding the name and the note that wasn't taken, is offered first.
     const offer = [...(otherPick ? [otherPick] : []), ...held].filter((e, i, a) => a.indexOf(e) === i && e !== r.pick && !r.list.includes(e));
-    return { ...r, match: r.match === "exact" ? "closest" : r.match, list: [r.pick, ...offer, ...r.list.filter((e) => e !== r.pick)], offered: (e) => offer.includes(e) || r.offered(e), note: "name", searchName: r.match === "closest" || year.length > 0 };
+    return { ...r, match: r.match === "exact" ? "closest" : r.match, list: [r.pick, ...offer, ...r.list.filter((e) => e !== r.pick)], offered: (e) => offer.includes(e) || (r.offered(e) && holdsName(e)), note: "name", searchName: r.match === "closest" || year.length > 0 };
   }
   return null;
 }
