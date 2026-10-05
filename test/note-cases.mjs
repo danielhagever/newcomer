@@ -225,6 +225,12 @@ export const T = [
   ["Rambo (2)", "movie", (l) => /^rambo: first blood part ii( \(|$)/i.test(l)],
   ["Bad Boys (3)", "movie", (l) => /^bad boys for life( \(|$)/i.test(l)],
   ["Deadpool (3)", "movie", title("Deadpool & Wolverine")],
+  // pass 18 (written before recording): a show's note holding a number that isn't a season; a name that is a numeral
+  ["Drive to Survive (Formula 1)", "tv_show", title("Formula 1: Drive to Survive")],
+  ["Drive to Survive (Formula One)", "tv_show", title("Formula 1: Drive to Survive")],
+  ["X-Men (2)", "movie", (l) => /^x2\b/i.test(l)],
+  ["Fantastic Four (2)", "movie", title("Fantastic Four: Rise of the Silver Surfer")],
+  ["Knives Out (2)", "movie", (l) => /^glass onion/i.test(l)],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],
