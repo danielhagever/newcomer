@@ -276,6 +276,15 @@ export const T = [
   ["Shrek (second film)", "movie", title("Shrek 2")],
   ["Toy Story (third film)", "movie", title("Toy Story 3")],
   ["The Matrix (second one)", "movie", title("The Matrix Reloaded")],
+  // pass 25 (written before recording): ordinal notes searched as numbers; a note without its colon; a note that is the
+  // full official title holding the name
+  ["Mad Max (second film)", "movie", title("The Road Warrior")],
+  ["The Matrix (the second one)", "movie", title("The Matrix Reloaded")],
+  ["Star Trek (Star Trek The Next Generation)", "tv_show", title("Star Trek: The Next Generation")],
+  ["Jurassic Park (The Lost World: Jurassic Park)", "movie", title("The Lost World: Jurassic Park")],
+  ["Twilight (The Twilight Saga: New Moon)", "movie", title("The Twilight Saga: New Moon")],
+  ["Mad Max (Furiosa: A Mad Max Saga)", "movie", title("Furiosa: A Mad Max Saga")],
+  ["Planet of the Apes (Rise of the Planet of the Apes)", "movie", title("Rise of the Planet of the Apes")],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],

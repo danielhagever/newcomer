@@ -74,6 +74,8 @@ const NOTES: [string, any[], string][] = [
   ["The Matrix (2)", [film("The Matrix", "1999"), film("The Matrix Resurrections", "2021"), film("The Matrix Reloaded", "2003")], "The Matrix Reloaded (2003) closest"], // Qloo's second answer only as a sequel named otherwise
   ["Fantastic 4 (2)", [film("Fantastic Four: Rise of the Silver Surfer", "2007"), film("The Fantastic Four: First Steps", "2025")], "Fantastic Four: Rise of the Silver Surfer (2007) closest"], // the name's Four is the typed 4, not another number
   ["The Hunger Games (3)", [film("The Hunger Games: Mockingjay - Part 2", "2015"), film("The Hunger Games", "2012"), film("The Hunger Games: Catching Fire", "2013"), film("The Hunger Games: Mockingjay - Part 1", "2014")], "The Hunger Games: Mockingjay - Part 1 (2014) closest"], // a top answer with another part number loses to the count
+  ["Mission: Impossible (Dead Reckoning)", [film("Mission: Impossible - Dead Reckoning Part One", "2023"), film("Dead Reckoning", "1947")], "Mission: Impossible - Dead Reckoning Part One (2023) closest"], // "Part One" is not a later part: not the 1947 film
+  ["Mission: Impossible (Dead Reckoning film)", [film("Mission: Impossible - Dead Reckoning", "2023"), film("Dead Reckoning", "1947")], "Mission: Impossible - Dead Reckoning (2023) closest"], // nothing after the note: not a later part either
   // A one-word note is never the name of another title: "Phoenix" is the actor here, though a 2014 film is named that.
   ["Joker (Phoenix)", [film("Joker", "2019"), film("Phoenix", "2014")], "Joker (2019) closest"],
   // Nothing before the note, or nothing like it: no guess.
@@ -93,7 +95,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 254 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
+test("notes in brackets on Qloo's live answers: 261 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -115,7 +117,7 @@ test("notes in brackets on Qloo's live answers: 254 realistic inputs get the ent
   }
   // Every miss is a known limit, and every known limit still misses (so a fix there is noticed).
   assert.deepEqual(wrong, known);
-  assert.ok(searches <= 323, `${searches} Qloo searches for 254 names`);
+  assert.ok(searches <= 331, `${searches} Qloo searches for 261 names`);
 });
 
 test("when the exact name wins, the title named in the note is offered first under Not it? (Qloo's live answers)", () => {
@@ -136,9 +138,11 @@ test("a number word after a part word is searched as a digit (Qloo finds Episode
 
 test("with a note, Not it? offers only entries holding the name, besides the note's own titles (Qloo's live answers)", () => {
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
-  for (const [input, kind] of [["Dune (Part Two)", "movie"], ["The Godfather (Part II)", "movie"], ["It (Chapter Two)", "movie"]]) {
+  for (const [input, kind] of [["Dune (Part Two)", "movie"], ["The Godfather (Part II)", "movie"], ["It (Chapter Two)", "movie"], ["Rambo (First Blood)", "movie"]]) {
     const r = rankNames(together(F[`${kind}|${forSearch(input)}`], F[`${kind}|${withoutNote(input)}`]), input)!;
     const name = withoutNote(input).toLowerCase().replace(/^the /, "");
-    assert.deepEqual(r.list.filter((e) => e !== r.pick && r.offered(e) && !e.name.toLowerCase().includes(name)).map((e) => e.name), [], input);
+    const offered = r.list.filter((e) => e !== r.pick && r.offered(e));
+    assert.deepEqual(offered.filter((e) => !e.name.toLowerCase().includes(name)).map((e) => e.name), [], input);
+    assert.equal(new Set(offered).size, offered.length, `${input}: offered twice`);
   }
 });
