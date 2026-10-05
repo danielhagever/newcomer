@@ -86,7 +86,7 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 189 such inputs are recorded in test/note-fixtures.json):
+// live answers for 199 such inputs are recorded in test/note-fixtures.json):
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
@@ -112,8 +112,9 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 //   Rogue One), and kind words in the note hide nothing ("SpongeBob (movie)" is The SpongeBob SquarePants Movie).
 //   A note that is only a number asks for the Nth: the title with that number right after the name ("Shrek (2)" is
 //   Shrek 2); else Qloo's own top answer when it carries no number and belongs to the series ("Mad Max (2)" is The
-//   Road Warrior); else the Nth by year of the titles holding the name, from the one named exactly that, titles
-//   numbered otherwise left out ("The Hunger Games (2)" is Catching Fire, not Mockingjay - Part 2). Known limit: an
+//   Road Warrior); else the Nth by year of the titles starting with the name, from the one named exactly that,
+//   titles numbered otherwise left out ("The Hunger Games (2)" is Catching Fire, not Mockingjay - Part 2). On a TV
+//   show a number is a season ("Skins (series 2)" is Skins). Known limit: an
 //   unrelated title that reads as a sequel wins ("Alien (2)" is Alien 2: On Earth, a 1980 film, not Aliens). Kind words at the end of a note only say what it is ("(Raiders of the Lost Ark film)"). A title holding the
 //   name and the note that isn't taken is offered first under "Not it?", and otherwise only entries holding the
 //   name are offered ("Dune (Part Two)" isn't offered The Godfather Part II);
@@ -154,7 +155,7 @@ export interface Ranked {
 const KIND = new Set("band group rapper singer songwriter musician artist act dj producer duo trio composer film movie series show tv sitcom documentary docuseries miniseries anime cartoon podcast book novel game album song".split(" "));
 const LINKS = new Set(["for", "from", "to", "in", "on", "at", "with", "vs", "versus", "presents"]);
 // Words that mark a sequel or a part ("Vol. 3", "Part II").
-const PART = new Set(["part", "pt", "vol", "volume", "episode", "ep", "chapter", "ch"]);
+const PART = new Set(["part", "pt", "vol", "volume", "episode", "ep", "chapter", "ch", "season"]);
 // "aka" before a note says it's another name.
 const AKA = /^\s*(?:a\.?\s?k\.?\s?a\.?|also known as|known as)\s+/i;
 // What comes right after the given words at the start of a title: a separator (":", "-"), a linking word ("and the",
@@ -253,37 +254,35 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
     return cut > 0 && holdsExactly({ ...e, name: e.name.slice(0, cut) }, named) && after(e.name.slice(cut).replace(/^\s*[:\u2013\u2014-]\s*/, ""), noteLead) !== null;
   };
   const startsWithName = (e: Entity) => after(e.name, named) !== null;
-  // A note that is only a number ("The Hunger Games (2)", "Frozen (Part 2)") asks for the Nth: the title carrying that
-  // number right after the name ("Shrek 2", "Kill Bill: Vol. 2", "Men in Black II"), or else the Nth by year of the
-  // titles starting with the name, counting from the one named exactly that ("The Hunger Games: Catching Fire",
-  // "Harry Potter and the Chamber of Secrets"; not "Mockingjay - Part 2", whose 2 belongs to Mockingjay).
+  // A note that is only a number ("The Hunger Games (2)", "Frozen (Part 2)") asks for the Nth film: the title
+  // numbered that way right after the name ("Shrek 2", "Kill Bill: Vol. 2", "The Lord of the Rings: The Two
+  // Towers"); else Qloo's own top answer for "Name (N)", when it carries no number and belongs to the series ("Mad
+  // Max (2)" is The Road Warrior; not for the first); else the Nth by year of the titles starting with the name,
+  // from the one named exactly that, titles numbered otherwise left out ("The Hunger Games (2)" is Catching Fire,
+  // not Mockingjay - Part 2). On a TV show a number is a season, and Qloo keeps a show as one entry: the show.
   const numbers = titleWords.filter((w) => NUMBER.has(w));
-  if (numbers.length === 1 && titleWords.length === 1) {
+  const anchor = named_ ? r!.pick : null;
+  const show = (anchor ?? found[0])?.types.includes("urn:entity:tv_show");
+  if (numbers.length === 1 && titleWords.length === 1 && !show) {
     const n = NUMBER.get(numbers[0])! + 1;
-    // The number a title gives itself right after the name ("Rocky III"), if any.
+    // The number a title gives itself right after the name ("Rocky III", "The Two Towers"), if any.
     const ownNumber = (e: Entity) => {
       const rest = isArtist(e) ? null : wordsAfter(e.name, named);
-      const w = rest?.find((x) => !PART.has(x));
+      const w = rest?.find((x) => !PART.has(x) && !SMALL.has(x) && !LINKS.has(x));
       return w && NUMBER.has(w) ? w : null;
     };
     const numbered = found.filter((e) => ownNumber(e) && sameWord(numbers[0], ownNumber(e)!));
-    const anchor = named_ ? r!.pick : null;
-    // Qloo's own answer for "Name (N)" is usually the Nth ("Mad Max (2)" is The Road Warrior), unless that answer carries
-    // a number of its own ("Mockingjay - Part 2" for "The Hunger Games (2)"): then the Nth by year of the titles
-    // holding the name, counting from the one named exactly that, leaving out titles numbered otherwise ("Rocky III").
     const hasNumber = (e: Entity) => words(e.name).some((w) => NUMBER.has(w));
     const top = found[0];
-    const trusted = !!top && !isArtist(top) && top !== anchor && !hasNumber(top) && (anchor ? yearOf(top) > yearOf(anchor) : holdsName(top));
+    const trusted = n > 1 && !!top && !isArtist(top) && top !== anchor && !hasNumber(top) && (anchor ? yearOf(top) > yearOf(anchor) : holdsName(top));
     const since = anchor ? yearOf(anchor) : NaN;
     const later = found
-      .filter((e) => e !== anchor && !isArtist(e) && holdsName(e) && !ownNumber(e) && !Number.isNaN(yearOf(e)) && (Number.isNaN(since) || yearOf(e) > since))
+      .filter((e) => e !== anchor && !isArtist(e) && startsWithName(e) && !ownNumber(e) && !Number.isNaN(yearOf(e)) && (Number.isNaN(since) || yearOf(e) > since))
       .map((e, i) => ({ e, i }))
       .sort((x, y) => yearOf(x.e) - yearOf(y.e) || x.i - y.i)
       .map((x) => x.e);
     const series = anchor ? [anchor, ...later] : later;
-    const pick = numbered[0] ?? (n === 1 ? (anchor ?? (trusted ? top : later[0])) : trusted ? top : series[n - 1]);
-    // Without a title named exactly the name, the name alone is searched too: the first film may be missing.
-    if (!pick && !anchor) return r ? { ...r, match: "closest", note: "name", searchName: true } : null;
+    const pick = numbered[0] ?? (trusted ? top : series[n - 1]);
     if (pick) {
       const byName = rankTyped(found, bare);
       return { pick, match: "closest", list: [pick, ...(byName?.list ?? []).filter((e) => e !== pick)], offered: (e) => !!byName?.offered(e) && holdsName(e), note: "title", searchName: !numbered.length && !anchor && !trusted };

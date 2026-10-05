@@ -200,6 +200,17 @@ export const T = [
   ["Alien (2)", "movie", title("Aliens"), "an unrelated film is titled Alien 2"],
   ["Terminator (2)", "movie", title("Terminator 2: Judgment Day")],
   ["Die Hard (2)", "movie", title("Die Hard 2")],
+  // pass 15 (written before recording): a number on a TV show is a season; the second Lord of the Rings; first films
+  ["Skins (series 2)", "tv_show", at("skins", "2007")],
+  ["Skins (season 2)", "tv_show", at("skins", "2007")],
+  ["Fargo (series 2)", "tv_show", at("fargo", "2014")],
+  ["The Bear (2)", "tv_show", at("the bear", "2022")],
+  ["The Mandalorian (Season 2)", "tv_show", at("the mandalorian", "2019")],
+  ["Stranger Things (Season 4)", "tv_show", only("Stranger Things")],
+  ["The Lord of the Rings (2)", "movie", title("The Lord of the Rings: The Two Towers")],
+  ["Die Hard (3)", "movie", title("Die Hard with a Vengeance")],
+  ["Shrek (3)", "movie", title("Shrek the Third")],
+  ["Toy Story (1)", "movie", at("toy story", "1995")],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],
