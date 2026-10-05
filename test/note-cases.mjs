@@ -1,5 +1,5 @@
 // Realistic inputs with a note in brackets, the kind, and what a reasonable person expects (a test on the pick's
-// label "name (disambiguation)"), written before looking at Qloo's answers; those were recorded live on 2026-10-04
+// label "name (disambiguation)"), written before looking at Qloo's answers; those were recorded live on 2026-10-04 and 2026-10-05
 // (test/note-fixtures.json: the search for the whole text and for the name before the note). Shared by Newcomer
 // and Booker.
 const starts = (s) => (l) => l.toLowerCase().startsWith(s.toLowerCase());
@@ -294,6 +294,19 @@ export const T = [
   ["The Matrix (second installment)", "movie", title("The Matrix Reloaded")],
   ["Predator (Alien vs. Predator)", "movie", title("Alien vs. Predator")], // Qloo's name for AVP (my expected title was the official one)
   ["Kong (Godzilla vs. Kong)", "movie", title("Godzilla vs. Kong")],
+  // A note adding a number to the whole name, or continuing it with "&" or a linking word (pass 27, recorded 2026-10-05).
+  ["Blade Runner (Blade Runner 2049)", "movie", title("Blade Runner 2049")],
+  ["Wonder Woman (Wonder Woman 1984)", "movie", title("Wonder Woman 1984")],
+  ["Spider-Man (The Amazing Spider-Man 2)", "movie", title("The Amazing Spider-Man 2")],
+  ["Godzilla (Godzilla Minus One)", "movie", title("Godzilla Minus One")],
+  ["Deadpool (Deadpool & Wolverine)", "movie", title("Deadpool & Wolverine")],
+  ["Bad Boys (Bad Boys for Life)", "movie", title("Bad Boys for Life")],
+  ["Thelma (Thelma & Louise)", "movie", title("Thelma & Louise")],
+  ["Mean Girls (Mean Girls 2024)", "movie", at("mean girls", "2024")], // a year, not a title
+  ["Dune (Dune 2021)", "movie", at("dune", "2021")],
+  // A hyphen inside a name is not a separator ("X-Men Origins: Wolverine" is X-Men, then Origins, then the note).
+  ["X-Men (Wolverine)", "movie", title("X-Men Origins: Wolverine")],
+  ["Ant-Man (Quantumania)", "movie", title("Ant-Man and the Wasp: Quantumania")],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],

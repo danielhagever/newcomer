@@ -2,7 +2,7 @@
 // with Booker; its venue and list cases don't apply here and are skipped). Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { forSearch, rankNames, together, withoutNote } from "../src/names.ts";
+import { after, forSearch, rankNames, together, withoutNote } from "../src/names.ts";
 import { readFileSync } from "node:fs";
 // @ts-ignore: plain JavaScript table
 import cases from "./name-cases.mjs";
@@ -88,6 +88,24 @@ test("a note in brackets at the end picks which one; unless the whole text is a 
   assert.deepEqual(wrong, []);
 });
 
+test("how a title goes on after the name: a separator, a \"!\" or \"?\" before more words, or a dash (real titles)", () => {
+  assert.equal(after("Mamma Mia! Here We Go Again", ["mamma", "mia"]), "sep");
+  assert.equal(after("Are You Being Served? Again!", ["are", "you", "being", "served"]), "sep");
+  assert.equal(after("Mamma Mia!", ["mamma", "mia"]), "end"); // nothing after the "!"
+  assert.equal(after("Yo! MTV Raps", ["yo", "mtv", "raps"]), "end"); // a "!" inside the name
+  let n = 0;
+  const film = (name: string, year: string) => ({ id: `t${++n}`, name, types: ["urn:entity:movie"], disambiguation: year });
+  const pick = (input: string, found: any[]) => { const r = rankNames(found, input); return r ? `${r.pick.name} (${r.pick.disambiguation})` : "none"; };
+  assert.equal(pick("Are You Being Served (Again)", [film("Are You Being Served?", "1977"), film("Are You Being Served? Again!", "1992")]), "Are You Being Served? Again! (1992)");
+  // A found title named exactly the note, with a separator in it, is a title, not a fuller name (Qloo writes ":").
+  for (const dash of [" - ", " \u2013 ", " \u2014 "])
+    assert.equal(pick("Jurassic Park (The Lost World Jurassic Park)", [film("Jurassic Park", "1993"), film(`The Lost World${dash}Jurassic Park`, "1997")]), `The Lost World${dash}Jurassic Park (1997)`);
+  // A hyphen inside a name is not a separator: on Qloo's recorded answers for "X-Men" alone, with X-Men (2000) among
+  // them, "X-Men Origins: Wolverine" is X-Men, then Origins, then the note.
+  const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
+  assert.equal(rankNames(F["movie|X-Men"], "X-Men (Wolverine)")?.pick.name, "X-Men Origins: Wolverine");
+});
+
 test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Succession (TV series)"), "Succession");
   assert.equal(withoutNote("Dune [2021]"), "Dune");
@@ -95,7 +113,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 268 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
+test("notes in brackets on Qloo's live answers: 279 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -117,7 +135,7 @@ test("notes in brackets on Qloo's live answers: 268 realistic inputs get the ent
   }
   // Every miss is a known limit, and every known limit still misses (so a fix there is noticed).
   assert.deepEqual(wrong, known);
-  assert.ok(searches <= 341, `${searches} Qloo searches for 268 names`);
+  assert.ok(searches <= 352, `${searches} Qloo searches for 279 names`);
 });
 
 test("when the exact name wins, the title named in the note is offered first under Not it? (Qloo's live answers)", () => {

@@ -129,6 +129,46 @@ test("the heatmap is asked without take or boundary (the live API rejects take >
   }
 });
 
+test("the heatmap waits 25 s for Qloo, its retry after a 429 too, every other Qloo call 12 s (a live heatmap took over 12 s once)", async () => {
+  const m = mockFetch(standardQloo());
+  const timeout = AbortSignal.timeout;
+  const limit = new Map<AbortSignal, number>();
+  AbortSignal.timeout = (ms: number) => { const s = timeout.call(AbortSignal, ms); limit.set(s, ms); return s; };
+  const mocked = globalThis.fetch;
+  const asked: [string, number | undefined][] = [];
+  globalThis.fetch = ((input: any, init?: RequestInit) => {
+    const u = new URL(String(input));
+    if (u.host === "qloo.test") asked.push([u.searchParams.get("filter.type") ?? u.pathname, limit.get(init!.signal!)]);
+    if (asked.filter(([what]) => what === "urn:heatmap").length === 1 && u.searchParams.get("filter.type") === "urn:heatmap") return Promise.resolve(new Response("{}", { status: 429 }));
+    return mocked(input, init);
+  }) as typeof fetch;
+  try {
+    const { kv } = memoryKV();
+    await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.deepEqual(asked.filter(([what]) => what === "urn:heatmap").map(([, ms]) => ms), [25000, 25000]);
+    const rest = asked.filter(([what]) => what !== "urn:heatmap");
+    assert.ok(rest.length >= 2 && rest.every(([, ms]) => ms === 12000), JSON.stringify(rest));
+  } finally {
+    globalThis.fetch = mocked;
+    AbortSignal.timeout = timeout;
+    m.restore();
+  }
+});
+
+test("a Qloo call that runs out of time says so, never 'not found'", async () => {
+  const m = mockFetch(standardQloo());
+  const mocked = globalThis.fetch;
+  globalThis.fetch = ((input: any, init?: RequestInit) =>
+    new URL(String(input)).searchParams.get("filter.type") === "urn:heatmap" ? Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError")) : mocked(input, init)) as typeof fetch;
+  try {
+    const { kv } = memoryKV();
+    await assert.rejects(matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]), (e: AppError) => /took too long/.test(e.message) && e.status === 504);
+  } finally {
+    globalThis.fetch = mocked;
+    m.restore();
+  }
+});
+
 test("areas are ~1 km squares ranked by the mean percentile of all their cells, not by one hot cell", () => {
   // Square A: one perfect cell and seven weak ones. Square B: eight good cells.
   const cell = (g: string, i: number, affinity: number) => ({ lat: 30.005 + { a: 0, b: 0.02, c: 0.04 }[g]!, lon: -96.995, geohash: `9v6s0${g}${"bcdefghj"[i]}`, affinity });

@@ -54,8 +54,10 @@ export interface Provenance {
 
 export class QlooError extends AppError {}
 
-// Measured: tag searches take 3-4 s and heatmaps up to 5.4 s under load.
+// Measured: tag searches take 3-4 s. A city's heatmap took 1.8-6.3 s alone (2026-10-05) and 8-10 s while other
+// searches ran, and once over 12 s (a review's search failed with "took too long"), so it may take longer.
 const TIMEOUT_MS = 12000;
+export const HEATMAP_TIMEOUT_MS = 25000;
 
 // Qloo answers 429 to the sixth call within about a second (measured 2026-10-03 after a quiet minute:
 // 5 at once all 200, 6 at once lose one, 8 lose three; a steady 4 a second loses the sixth call every
@@ -96,7 +98,7 @@ export class Qloo {
   }
 
   // One bounded retry: a call from another search at the same moment can still meet a 429.
-  private async get(path: string, params: Record<string, string>, retry = true): Promise<any> {
+  private async get(path: string, params: Record<string, string>, retry = true, timeoutMs = TIMEOUT_MS): Promise<any> {
     if (!this.env.QLOO_API_KEY) throw new QlooError("The Qloo API key has not been configured yet.", 503);
     if (!this.budget.take()) throw new QlooError("This search needs more Qloo calls than one request allows. Try fewer interests.", 503);
     const base = this.env.QLOO_BASE_URL ?? "https://hackathon.api.qloo.com";
@@ -107,7 +109,7 @@ export class Qloo {
       const sent = fetchWithTimeout(
         `${base}${path}?${new URLSearchParams(params)}`,
         { headers: { "X-Api-Key": this.env.QLOO_API_KEY, accept: "application/json" } },
-        TIMEOUT_MS,
+        timeoutMs,
       );
       this.last = Date.now(); // before the next call's turn runs: it was queued after this one
       res = await sent;
@@ -123,7 +125,7 @@ export class Qloo {
     this.calls.push({ path, params, status: res.status, ms: Date.now() - t, count });
     if (res.status === 429 && retry && this.budget.left() > 1) {
       await new Promise((r) => setTimeout(r, 800));
-      return this.get(path, params, false);
+      return this.get(path, params, false, timeoutMs);
     }
     if (res.status === 429) throw new QlooError("Qloo's rate limit was reached. Please try again in a minute.", 429);
     if (res.status === 401 || res.status === 403) throw new QlooError("Qloo refused this app's API key, so no search can run right now.", 503);
@@ -159,7 +161,7 @@ export class Qloo {
   // and `page` are ignored for heatmaps (and take > 50 is a 400), and `affinity` is the cell's
   // percentile within the city (1 = best cell). The answer also names the locality Qloo used.
   async heatmap(signals: Signals, where: Where): Promise<{ points: HeatPoint[]; locality?: Locality }> {
-    const body = await this.get("/v2/insights", { "filter.type": "urn:heatmap", ...whereParams(where), ...signalParams(signals) });
+    const body = await this.get("/v2/insights", { "filter.type": "urn:heatmap", ...whereParams(where), ...signalParams(signals) }, true, HEATMAP_TIMEOUT_MS);
     const list: any[] = body?.results?.heatmap ?? [];
     const points = list
       .map((p) => {
