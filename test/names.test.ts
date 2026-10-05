@@ -2,7 +2,7 @@
 // with Booker; its venue and list cases don't apply here and are skipped). Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { abbreviates, abbreviations, after, forSearch, rankNames, together, withoutNote } from "../src/names.ts";
+import { abbreviates, abbreviations, after, credits, forSearch, rankNames, together, withoutNote } from "../src/names.ts";
 import { readFileSync } from "node:fs";
 // @ts-ignore: plain JavaScript table
 import cases from "./name-cases.mjs";
@@ -99,6 +99,10 @@ test("how a title goes on after the name: a separator, a \"!\" or \"?\" before m
   assert.deepEqual([...abbreviations("Harry S. Truman")], []); // one capital is a person's initial
   assert.deepEqual([...abbreviations("AMY WINEHOUSE")], []); // a note wholly in capitals says nothing
   assert.deepEqual([...abbreviations("SVU")], ["svu"]);
+  assert.deepEqual([...abbreviations("NCIS LA", "NCIS")], ["ncis", "la"]); // the name's own capitals don't make it shouted
+  assert.ok(credits(["jane", "austen"], "1815, Jane Austen") && credits(["harlen", "coben"], "2015, Harlan Coben")); // a misspelling
+  assert.ok(!credits(["stephen", "king"], "2019, Stephen Fry")); // every word, not a shared first name
+  assert.ok(!credits(["2016"], "2015, Harlan Coben")); // a year as written
   let n = 0;
   const film = (name: string, year: string) => ({ id: `t${++n}`, name, types: ["urn:entity:movie"], disambiguation: year });
   const pick = (input: string, found: any[]) => { const r = rankNames(found, input); return r ? `${r.pick.name} (${r.pick.disambiguation})` : "none"; };
@@ -110,6 +114,12 @@ test("how a title goes on after the name: a separator, a \"!\" or \"?\" before m
   // them, "X-Men Origins: Wolverine" is X-Men, then Origins, then the note.
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   assert.equal(rankNames(F["movie|X-Men"], "X-Men (Wolverine)")?.pick.name, "X-Men Origins: Wolverine");
+  // Qloo writes a book in a series with the series after it: the name is still Dune, but only the closest match (so
+  // the film is offered too); a record with another note in brackets is another name (Qloo's answers for "Mos Def").
+  const dune = rankNames(F["book|Dune"], "Dune")!;
+  assert.deepEqual([dune.pick.name, dune.match], ["Dune (Dune, #1)", "closest"]);
+  const mos = rankNames(F["artist|Mos Def"], "Mos Def")!;
+  assert.deepEqual([mos.pick.name, mos.match], ["Mos Def", "exact"]);
 });
 
 test("Qloo is searched with the name before a note in brackets", () => {
@@ -119,7 +129,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 322 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
+test("notes in brackets on Qloo's live answers: 338 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -141,7 +151,7 @@ test("notes in brackets on Qloo's live answers: 322 realistic inputs get the ent
   }
   // Every miss is a known limit, and every known limit still misses (so a fix there is noticed).
   assert.deepEqual(wrong, known);
-  assert.ok(searches <= 406, `${searches} Qloo searches for 322 names`);
+  assert.ok(searches <= 431, `${searches} Qloo searches for 338 names`);
 });
 
 test("when the exact name wins, the title named in the note is offered first under Not it? (Qloo's live answers)", () => {

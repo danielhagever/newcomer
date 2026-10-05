@@ -11,6 +11,7 @@ export interface QlooEnv {
   QLOO_API_KEY?: string;
   QLOO_BASE_URL?: string;
   QLOO_MIN_GAP_MS?: string; // tests set "0"
+  QLOO_TOTAL_MS?: string; // tests set a short one
 }
 
 export interface Entity {
@@ -59,6 +60,9 @@ export class QlooError extends AppError {}
 // over 20 s, so waiting helps more than asking again).
 const TIMEOUT_MS = 12000;
 export const HEATMAP_TIMEOUT_MS = 40000;
+// All of a search's Qloo calls share 50 s: each waits at most what is left, so a slow heatmap, the 25 km one
+// after it and a retry can't keep an agent waiting past a client's usual 60 s limit.
+const TOTAL_MS = 50000;
 
 // Qloo answers 429 to the sixth call within about a second (measured 2026-10-03 after a quiet minute:
 // 5 at once all 200, 6 at once lose one, 8 lose three; a steady 4 a second loses the sixth call every
@@ -75,9 +79,12 @@ export class Qloo {
   private gap: number;
   private last = -Infinity;
   private queue: Promise<void> = Promise.resolve();
+  private deadline: number;
   constructor(env: QlooEnv, budget: Budget) {
     this.env = env;
     this.budget = budget;
+    const total = Number(env.QLOO_TOTAL_MS);
+    this.deadline = Date.now() + (env.QLOO_TOTAL_MS !== undefined && Number.isFinite(total) ? total : TOTAL_MS);
     const g = Number(env.QLOO_MIN_GAP_MS);
     this.gap = env.QLOO_MIN_GAP_MS !== undefined && Number.isFinite(g) && g >= 0 ? g : MIN_GAP_MS;
   }
@@ -105,12 +112,14 @@ export class Qloo {
     const base = this.env.QLOO_BASE_URL ?? "https://hackathon.api.qloo.com";
     await this.turn();
     const t = Date.now(); // the time Qloo took, not the wait for a turn
+    const left = this.deadline - t;
+    if (left < 1000) throw new QlooError("Qloo took too long to answer. Please try again.", 504);
     let res: Response;
     try {
       const sent = fetchWithTimeout(
         `${base}${path}?${new URLSearchParams(params)}`,
         { headers: { "X-Api-Key": this.env.QLOO_API_KEY, accept: "application/json" } },
-        timeoutMs,
+        Math.min(timeoutMs, left),
       );
       this.last = Date.now(); // before the next call's turn runs: it was queued after this one
       res = await sent;

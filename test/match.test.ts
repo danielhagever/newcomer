@@ -175,6 +175,51 @@ test("a Qloo call that runs out of time says so, never 'not found' or 'no taste 
   }
 });
 
+test("a search's Qloo calls share 50 s: each waits at most what is left, and none starts with under a second left", async () => {
+  const timeout = AbortSignal.timeout;
+  const limit = new Map<AbortSignal, number>();
+  AbortSignal.timeout = (ms: number) => { const s = timeout.call(AbortSignal, ms); limit.set(s, ms); return s; };
+  const m = mockFetch(standardQloo());
+  const mocked = globalThis.fetch;
+  const asked: number[] = [];
+  globalThis.fetch = ((input: any, init?: RequestInit) => {
+    if (new URL(String(input)).host === "qloo.test") asked.push(limit.get(init!.signal!)!);
+    return mocked(input, init);
+  }) as typeof fetch;
+  try {
+    await matchNeighborhoods({ ...ENV(memoryKV().kv), QLOO_TOTAL_MS: "5000" }, new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.ok(asked.length > 1 && asked.every((ms) => ms > 1000 && ms <= 5000), JSON.stringify(asked));
+    const before = asked.length;
+    await assert.rejects(matchNeighborhoods({ ...ENV(memoryKV().kv), QLOO_TOTAL_MS: "0" }, new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]), (e: AppError) => /took too long/.test(e.message) && e.status === 504);
+    assert.equal(asked.length, before, "no Qloo call starts");
+  } finally {
+    globalThis.fetch = mocked;
+    AbortSignal.timeout = timeout;
+    m.restore();
+  }
+});
+
+test("the 50 s are counted from the start of the search: 48 s in a call still starts, 49.5 s in none does", async () => {
+  const m = mockFetch(standardQloo());
+  const now = Date.now;
+  let shift = 0;
+  Date.now = () => now() + shift;
+  try {
+    for (const [at, starts] of [[48000, true], [49500, false]] as const) {
+      shift = 0;
+      const q = new Qloo(ENV(memoryKV().kv), new Budget(48));
+      shift = at;
+      const before = m.calls.length;
+      if (starts) await q.search("Phoebe Bridgers");
+      else await assert.rejects(q.search("Phoebe Bridgers"), (e: AppError) => e.status === 504);
+      assert.equal(m.calls.length - before, starts ? 1 : 0, `${at} ms in`);
+    }
+  } finally {
+    Date.now = now;
+    m.restore();
+  }
+});
+
 test("a Qloo call that fails is still listed among the calls, with status 0", async () => {
   const timeout = () => new DOMException("The operation was aborted due to timeout", "TimeoutError");
   const cutOff = () => Promise.resolve(new Response(new ReadableStream({ start: (c) => c.error(timeout()) }), { status: 200 }));

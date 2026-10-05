@@ -13,7 +13,7 @@ export interface Env {
   ASSETS: Fetcher;
 }
 
-// Per address, per hour. A search is 3 to 20 Qloo calls (measured); parsing is one Workers AI call.
+// Per address, per hour. A search is 3 to 28 Qloo calls (measured); parsing is one Workers AI call.
 const LIMITS = { parse: 30, match: 20, mcp: 20 };
 
 const json = (d: unknown, status = 200) =>
@@ -26,7 +26,7 @@ const failure = (e: unknown) => {
 };
 
 // Bump whenever the pipeline or the result format changes, so no one gets yesterday's logic.
-const CACHE_VERSION = 43;
+const CACHE_VERSION = 44;
 
 // Returns the result and whether it came from the day's cache (the page says so: the timings in
 // "How we know" are from the run that made it). Only a new search passes the hourly gate: a saved answer

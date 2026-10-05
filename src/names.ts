@@ -86,7 +86,11 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 322 such inputs are recorded in test/note-fixtures.json):
+// live answers for 338 such inputs are recorded in test/note-fixtures.json):
+// - first, the entry named the name (not an act) whose disambiguation holds every word of the note, after "by" if
+//   there is one: a book's author ("Emma (Jane Austen)" is Emma, 1815, not a collection holding Emma; "Beloved (by
+//   Toni Morrison)" is Qloo's "Beloved (Beloved Trilogy, #1)", 1987; a misspelling or a possessive still counts, a
+//   year only as written), a place's town ("Joe's Pizza (Brooklyn)"), a film's year;
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
@@ -144,8 +148,6 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 //   from Qloo's answers), Qloo's second answer may stand as a title starting with the name ("Twilight (5)"). Kind words at the end of a note only say what it is ("(Raiders of the Lost Ark film)"). A title holding the
 //   name and the note that isn't taken is offered first under "Not it?", and otherwise only entries holding the
 //   name are offered ("Dune (Part Two)" isn't offered The Godfather Part II);
-// - a book's author, read from Qloo's disambiguation ("Emma (Jane Austen)" is Emma, 1815, not a collection holding
-//   Emma; "Beloved (Toni Morrison)" is Qloo's "Beloved (Beloved Trilogy, #1)", 1987);
 // - "aka" before the note says it's another name, so then an act may take it too ("Ye (aka Kanye West)");
 // - the name alone, among entries that don't hold the note's words; a year in the note picks among the near names
 //   holding the whole name, by Qloo's disambiguation ("Dune (2021 film)"; "The Lord of the Rings (2001)" is The
@@ -174,7 +176,8 @@ export interface Ranked {
   note?: "title" | "year" | "name" | "other name" | "credit"; // how a note in brackets was read
   // Qloo is searched with the whole text first; the name alone is searched too when nothing matched, when the
   // name matched only loosely ("The Godfather (Part I)" found only Part II and III), when the note's year wasn't
-  // among the entries ("Dune (2021 film)" found only the 1984 film), or before a pick the name itself may beat.
+  // among the entries ("Dune (2021 film)" found only the 1984 film), before a pick the name itself may beat, or
+  // when a book was taken as a title (its note is most often the author: "Emma (by Jane Austen)").
   searchName?: boolean;
 }
 
@@ -250,8 +253,16 @@ export const abbreviates = (w: string, title: string) => w.length > 1 && words(t
 // The abbreviations in a note: words of two capitals or more ("SVU", "LA"; one capital is a person's initial: "Harry
 // S. Truman"). A note wholly in capitals says nothing about abbreviations: it reads like the same note in lower case
 // ("Amy (AMY WINEHOUSE)" is Amy).
-export function abbreviations(note: string): Set<string> {
-  const shouted = !/\p{Ll}/u.test(note) && note.trim().split(/\s+/).length > 1;
+// Whether a disambiguation credits every word of a note ("1815, Jane Austen" for "Jane Austen"): a number as
+// written (a year), other words within a letter or two ("Jane Austin", "Toni Morrison's").
+export const credits = (note: string[], disambiguation: string) => {
+  const ws = words(disambiguation);
+  return note.every((w) => (/\d/.test(w) ? ws.includes(w) : closeTo(w, ws, false)));
+};
+export function abbreviations(note: string, name = ""): Set<string> {
+  const own = new Set(name.match(/[\p{L}\p{N}]+/gu) ?? []);
+  const rest = (note.match(/[\p{L}\p{N}]+/gu) ?? []).filter((t) => !own.has(t));
+  const shouted = rest.length > 1 && !rest.some((t) => /\p{Ll}/u.test(t));
   return new Set(shouted ? [] : (note.match(/\b[A-Z]{2,}\b/g) ?? []).map((w) => w.toLowerCase()));
 }
 
@@ -272,7 +283,7 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   const noted = ordinal ? String(ordinal) : trimKind(rawNote);
   // The note's words that aren't already in the name ("Chance the Rapper (rapper)" adds nothing).
   // An abbreviation is never a small word ("NCIS (LA)" is not "la"; "La Luz (LA)" is La Luz, whose own "La" it is).
-  const caps = abbreviations(rawNote);
+  const caps = abbreviations(rawNote, bare);
   const told = words(noted).filter((w) => (!SMALL.has(w) || caps.has(w)) && !closeTo(w, words(bare), false));
   const holds = (e: Entity, ws: string[]) => !!ws.length && ws.every((w) => closeTo(w, words(e.name), false));
   // Kind words don't make an entry the note's ("SpongeBob (movie)" keeps The SpongeBob Movie).
@@ -302,7 +313,7 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   // So is a note with a possessive right before the name ("Vacation (National Lampoon's Vacation)").
   const tokens = noted.split(/\s+/);
   const ati = named.length ? tokens.findIndex((t) => sameWord(words(t)[0] ?? "", named[0])) : -1;
-  const titleShaped = (at > 0 && (SMALL.has(nw[at - 1]) || LINKS.has(nw[at - 1]))) || (ati > 0 && /['\u2019]s$/i.test(tokens[ati - 1]));
+  const titleShaped = (at > 0 && (SMALL.has(nw[at - 1]) || LINKS.has(nw[at - 1]))) || tokens.slice(0, Math.max(ati, 0)).some((t) => /['\u2019]s$/i.test(t));
   const namesTitle = found.some((e) => nameKey(e.name) === nameKey(noted) && (after(e.name, named) === "sep" || SEPARATOR.test(e.name)));
   // A person's name never adds a number ("Blade Runner (Blade Runner 2049)") or a word in capitals ("Love Island
   // (Love Island USA)"), nor continues with "and", "of" or a linking word ("Deadpool (Deadpool & Wolverine)", "Toy
@@ -428,7 +439,8 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   // A book's author is in Qloo's disambiguation: an entry named the name (Qloo's own series note aside: "Dune (Dune,
   // #1)") whose disambiguation holds every word of the note is taken first ("Emma (Jane Austen)" is Emma, 1815, not
   // a collection holding Emma). Not an act, whose disambiguation is its name.
-  const credited = told.length ? found.find((e) => !isArtist(e) && nameKey(withoutNote(e.name)) === nameKey(bare) && !!e.disambiguation && told.every((w) => words(e.disambiguation!).some((x) => sameWord(w, x)))) : undefined;
+  const credit = told.includes("by") ? told.slice(told.indexOf("by") + 1) : told;
+  const credited = credit.length ? found.find((e) => !isArtist(e) && nameKey(unseries(e.name)) === nameKey(bare) && !!e.disambiguation && credits(credit, e.disambiguation)) : undefined;
   if (credited) {
     const byName = rankTyped(found, bare);
     return { pick: credited, match: "closest", list: [credited, ...(byName?.list ?? []).filter((e) => e !== credited)], offered: (e) => !!byName?.offered(e) && holdsName(e), note: "credit" };
@@ -469,6 +481,10 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
 // Search results for the whole text, then those for the name alone that weren't among them.
 export const together = (a: Entity[], b: Entity[]) => [...a, ...b.filter((e) => !a.some((x) => x.id === e.id))];
 
+// Qloo names a book in a series with the series after it ("Beloved (Beloved Trilogy, #1)", "Dune (Dune, #1)"): not
+// part of the name.
+const SERIES = /\s*\([^()]*#\d+\)\s*$/;
+const unseries = (s: string) => s.replace(SERIES, "");
 function rankTyped(found: Entity[], input: string): Ranked | null {
   // Typed with an article, the name letter for letter comes first ("The Killers" is The Killers before
   // Killers; "A Savage" is A. Savage before Savage), and a name equal without the article still makes it
@@ -478,9 +494,9 @@ function rankTyped(found: Entity[], input: string): Ranked | null {
   const startsWithArticle = allWords(input).length > 1 && ARTICLES.has(allWords(input)[0]); // also "A. Savage"
   // Among those, a typed initial puts the record written the same way first ("A. Savage" is A. Savage before A
   // Savage); typed without the dot, Qloo's order stands.
-  const literally = startsWithArticle ? found.filter((e) => allWords(e.name).join(" ") === literalKey) : [];
+  const literally = startsWithArticle ? found.filter((e) => allWords(unseries(e.name)).join(" ") === literalKey) : [];
   if (!article(input, allWords(input))) literally.sort((x, y) => Number(nameKey(y.name) === nameKey(input)) - Number(nameKey(x.name) === nameKey(input)));
-  const spaced = [...literally, ...found.filter((e) => nameKey(e.name) === nameKey(input) && !literally.includes(e))];
+  const spaced = [...literally, ...found.filter((e) => nameKey(unseries(e.name)) === nameKey(input) && !literally.includes(e))];
   const initials = (x: string) => words(x).some((w) => w.length === 1);
   const same = (e: Entity) => squashed(e.name) === squashed(input);
   const exact = spaced.length ? spaced : found.filter((e) => (initials(input) || initials(e.name)) && same(e));
@@ -533,5 +549,7 @@ function rankTyped(found: Entity[], input: string): Ranked | null {
   const fragment = (e: Entity) => !!exact.length && part(e) && !inside(e) && !exact.includes(e) && !same(e);
   const offered = (e: Entity) => (sure(e) && !fragment(e)) || share(typedWords, words(e.name), plurals) > 0.5;
   const pick = exact[0] ?? list[0];
-  return { pick, match: exact.length === 1 ? "exact" : exact.length > 1 ? "ambiguous" : "closest", list, offered };
+  // A name equal only once Qloo's series note is set aside is the right pick, not an exact name: "Dune" typed as a book
+  // is Dune (Dune, #1), and the film is still offered in case the kind was a guess.
+  return { pick, match: exact.length > 1 ? "ambiguous" : exact.length === 1 && unseries(exact[0].name) === exact[0].name ? "exact" : "closest", list, offered };
 }

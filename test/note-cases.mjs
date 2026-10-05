@@ -347,6 +347,24 @@ export const T = [
   ["Stand (Stand by Me)", "movie", title("Stand by Me")],
   ["Truman (Harry S. Truman)", "movie", at("truman", "1995"), "two films are named exactly Truman (2015, 1995) and a note naming the man doesn't say which: Qloo's order"],
   ["Kennedy (John F. Kennedy)", "movie", (l) => l.startsWith("Kennedy")],
+  // Books by name alone (Qloo writes the series after the famous one), authors after "by", misspelled or possessive,
+  // notes on a name in capitals, possessives earlier in the note, a place by its borough (pass 30, recorded 2026-10-05).
+  ["Beloved", "book", (l) => l.startsWith("Beloved") && l.includes("Toni Morrison")],
+  ["The Giver", "book", (l) => l.startsWith("The Giver") && l.includes("Lois Lowry")],
+  ["A Game of Thrones", "book", (l) => l.startsWith("A Game of Thrones") && l.includes("George R.R. Martin")],
+  ["Game of Thrones (George R.R. Martin)", "book", (l) => l.startsWith("A Game of Thrones") && l.includes("George R.R. Martin")],
+  ["Beloved (by Toni Morrison)", "book", (l) => l.startsWith("Beloved") && l.includes("Toni Morrison")],
+  ["The Road (by Jack London)", "book", (l) => l.startsWith("The Road") && l.includes("Jack London")],
+  ["It (by Alexa Chung)", "book", (l) => l.startsWith("It") && l.includes("Alexa Chung")],
+  ["The Stranger (by Harlan Coben)", "book", (l) => l.startsWith("The Stranger") && l.includes("Harlan Coben")],
+  ["Emma (Jane Austin)", "book", (l) => l.startsWith("Emma") && l.includes("Jane Austen")], // the author misspelled
+  ["Beloved (Toni Morrison's novel)", "book", (l) => l.startsWith("Beloved") && l.includes("Toni Morrison")],
+  ["NCIS (NCIS LA)", "tv_show", (l) => l.startsWith("NCIS: Los Angeles")],
+  ["NCIS (NCIS: LA)", "tv_show", (l) => l.startsWith("NCIS: Los Angeles")],
+  ["Vacation (National Lampoon's Christmas Vacation)", "movie", title("National Lampoon's Christmas Vacation")],
+  ["Vacation (National Lampoon's European Vacation)", "movie", title("National Lampoon's European Vacation")],
+  ["Joe's Pizza (Brooklyn)", "place", (l) => l.includes("Brooklyn")],
+  ["The Stranger (2016)", "book", (l) => l.startsWith("The Stranger (2016")], // a year is read exactly: not Coben's 2015
   ["Vacation (National Lampoon's Vacation)", "movie", title("National Lampoon's Vacation")],
   ["Dracula (Bram Stoker's Dracula)", "movie", at("dracula", "1992")], // corrected after recording: Qloo names Bram Stoker's Dracula plain "Dracula" (1992)
   ["Vacation (National Lampoon\u2019s Vacation)", "movie", title("National Lampoon's Vacation")], // a curly apostrophe, as phones type it
