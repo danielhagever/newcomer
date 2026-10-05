@@ -175,7 +175,7 @@ test("a Qloo call that runs out of time says so, never 'not found' or 'no taste 
   }
 });
 
-test("a search's Qloo calls share 50 s: each waits at most what is left, and none starts with under a second left", async () => {
+test("a search's Qloo calls share 45 s: each waits at most what is left, and none starts with under a second left", async () => {
   const timeout = AbortSignal.timeout;
   const limit = new Map<AbortSignal, number>();
   AbortSignal.timeout = (ms: number) => { const s = timeout.call(AbortSignal, ms); limit.set(s, ms); return s; };
@@ -199,13 +199,13 @@ test("a search's Qloo calls share 50 s: each waits at most what is left, and non
   }
 });
 
-test("the 50 s are counted from the start of the search: 48 s in a call still starts, 49.5 s in none does", async () => {
+test("the 45 s are counted from the start of the search: 43 s in a call still starts, 44.5 s in none does", async () => {
   const m = mockFetch(standardQloo());
   const now = Date.now;
   let shift = 0;
   Date.now = () => now() + shift;
   try {
-    for (const [at, starts] of [[48000, true], [49500, false]] as const) {
+    for (const [at, starts] of [[43000, true], [44500, false]] as const) {
       shift = 0;
       const q = new Qloo(ENV(memoryKV().kv), new Budget(48));
       shift = at;
@@ -267,6 +267,52 @@ test("areas are named by Qloo's own neighborhood field; OpenStreetMap is not cal
     assert.equal(r.neighborhoods[0].name, "East Cesar Chavez");
     assert.equal(r.neighborhoods.length, 1, "squares Qloo puts in the same neighborhood are merged");
     assert.equal(m.calls.filter((c) => c.host === "photon.komoot.io").length, 0);
+  } finally {
+    m.restore();
+  }
+});
+
+test("an area is named by the places inside its own square, else OpenStreetMap, else the places around it; never the city or a ward", async () => {
+  // Live in Arlington: Rosslyn's square found Georgetown's places across the river, and Qloo has no neighborhood for
+  // Rosslyn's own; Qloo files the National Mall under "Ward 2"; OpenStreetMap names a Brooklyn square "Brooklyn".
+  const run = async (inside: string | null, around: string | null, osm: string, locality?: string, insideIs = "Cafe") => {
+    const m = mockFetch((c) => {
+      if (c.host === "photon.komoot.io") return { body: { features: [{ properties: { district: osm, ...(locality ? { locality } : {}) } }] } };
+      if (isPlaces(c) && !c.params.get("filter.tags")) {
+        const at = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/);
+        const lat = at ? +at[2] : AUSTIN.latitude, lon = at ? +at[1] : AUSTIN.longitude;
+        return { body: { results: { entities: [
+          place(`in-${lat}`, "Inside", inside, lat, lon, [insideIs], ["Morning"]),
+          ...[1, 2, 3].map((i) => place(`out-${lat}-${i}`, `Across ${i}`, around, lat + 0.02, lon, ["Cocktail bar"], ["Evening"])),
+        ] } } };
+      }
+      return standardQloo()(c);
+    });
+    try {
+      const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+      return r.neighborhoods[0]?.name;
+    } finally {
+      m.restore();
+    }
+  };
+  assert.equal(await run("East Austin", "Georgetown", "Rosslyn"), "East Austin"); // one place inside beats three across
+  assert.equal(await run(null, "Georgetown", "Rosslyn"), "Rosslyn");
+  assert.equal(await run("Ward 2", "Georgetown", "Rosslyn"), "Rosslyn"); // a ward number says nothing
+  assert.equal(await run(null, "Williamsburg", "Austin"), "Williamsburg"); // nor OpenStreetMap naming the city
+  assert.equal(await run(null, "Williamsburg", "Austin", "Dumbo"), "Dumbo"); // then its finer name (New York's district is the borough)
+  assert.equal(await run("Whitehall", "Georgetown", "Rosslyn", undefined, "Ferry terminal"), "Rosslyn"); // a place no one visits names nothing
+  assert.equal(await run(null, "Georgetown", "Clarendon", "Lyon Village"), "Clarendon"); // the district before the finer locality (Arlington, live)
+});
+
+test("OpenStreetMap names cached in the old one-name form are not read (they are kept under a new key)", async () => {
+  const m = mockFetch(standardQloo({ hood: () => null }));
+  try {
+    const { kv, store } = memoryKV();
+    const old: Record<string, string> = {};
+    for (let i = 0; i < 30; i++) for (let j = 0; j < 30; j++) old[`${(30.12 + i / 100).toFixed(2)},${(-97.89 + j / 100).toFixed(2)}`] = "Old Name";
+    store.set("names:austin, texas", JSON.stringify(old));
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.ok(r.neighborhoods.length && r.neighborhoods.every((h) => h.name.startsWith("OSM District")), JSON.stringify(r.neighborhoods.map((h) => h.name)));
   } finally {
     m.restore();
   }
@@ -622,6 +668,8 @@ test("can't-visit places are judged by Qloo's categories, not names, and filtere
     place("s1", "Some High School", "Downtown", 30.27, -97.74, ["High school"], ["Morning"]),
     place("s2", "Piccadilly Circus", "Downtown", 30.27, -97.74, ["Subway station"], ["Morning"]),
     place("s3", "St. Somebody", "Downtown", 30.27, -97.74, ["Church"], ["Morning"]),
+    place("s4", "DUMBO", "Downtown", 30.27, -97.74, ["Ferry terminal"], ["Morning"]), // live: a Sunday stop in Little Italy
+    place("s5", "Chicago O'Hare International Airport", "Downtown", 30.27, -97.74, ["International airport"], ["Morning"]),
     place("v1", "The Garage", "Downtown", 30.27, -97.74, ["Cocktail bar"], ["Evening"]),
     place("v2", "Temple Bar", "Downtown", 30.27, -97.74, ["Pub"], ["Evening"]),
     place("v3", "Bank & Bourbon", "Downtown", 30.27, -97.74, ["Restaurant"], ["Evening"]),
@@ -634,7 +682,7 @@ test("can't-visit places are judged by Qloo's categories, not names, and filtere
     const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
     const listed = r.neighborhoods.flatMap((h) => h.evidence.map((e) => e.name));
     assert.deepEqual(listed.sort(), ["Bank & Bourbon", "Cafe One", "Gallery Two", "Temple Bar", "The Garage"]);
-    assert.ok(r.trace.some((t) => t.step === "Filter" && /Left out 3 places/.test(t.detail)));
+    assert.ok(r.trace.some((t) => t.step === "Filter" && /Left out 5 places/.test(t.detail)));
   } finally {
     m.restore();
   }

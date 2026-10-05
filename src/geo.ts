@@ -262,15 +262,17 @@ async function byId(budget: Budget, id: number): Promise<any[]> {
 
 const cellKey = (lat: number, lon: number) => `${lat.toFixed(2)},${lon.toFixed(2)}`; // about 1 km
 
-async function reverseName(lat: number, lon: number): Promise<string> {
+// The names OpenStreetMap gives a spot, the neighborhood level first: its district, then the finer locality (in New
+// York the district is the borough, "Brooklyn" for Dumbo; in Washington a ward, "Ward 1" for Adams Morgan, measured),
+// then the suburb; a street is labelled as such rather than passed off as a neighborhood.
+async function reverseName(lat: number, lon: number): Promise<string[]> {
   try {
     const res = await fetchWithTimeout(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&lang=en`, { headers: UA }, 5000);
     const d: any = await res.json();
     const p = d.features?.[0]?.properties ?? {};
-    // Prefer real neighborhood-level names; a street is labelled as such rather than passed off as a neighborhood.
-    return p.district ?? p.locality ?? p.suburb ?? (p.street ? `around ${p.street}` : "");
+    return [p.district, p.locality, p.suburb, p.street ? `around ${p.street}` : undefined].filter((n): n is string => typeof n === "string" && !!n.trim());
   } catch {
-    return "";
+    return [];
   }
 }
 
@@ -282,22 +284,22 @@ export async function namesFor(
   cityKey: string,
   cells: { lat: number; lon: number }[],
   reserve: number,
-): Promise<{ names: Map<string, string>; missing: number }> {
-  const key = `names:${cityKey.toLowerCase()}`;
-  const known: Record<string, string> = (await kvGet(cache, budget, key)) ?? {};
+): Promise<{ names: Map<string, string[]>; missing: number }> {
+  const key = `names2:${cityKey.toLowerCase()}`; // names2: each cell keeps every name OpenStreetMap gives it
+  const known: Record<string, string[]> = (await kvGet(cache, budget, key)) ?? {};
   const want = [...new Set(cells.map((c) => cellKey(c.lat, c.lon)))].filter((k) => !(k in known));
-  const fresh: Record<string, string> = {};
+  const fresh: Record<string, string[]> = {};
   for (let i = 0; i < want.length; i += 6) {
     const batch = want.slice(i, i + 6).filter(() => budget.left() > reserve + 1 && budget.take());
     if (!batch.length) break;
     const got = await Promise.all(batch.map((k) => reverseName(+k.split(",")[0], +k.split(",")[1])));
     batch.forEach((k, j) => {
-      if (got[j]) fresh[k] = got[j];
+      if (got[j].length) fresh[k] = got[j];
     });
   }
   if (Object.keys(fresh).length) await kvPut(cache, budget, key, { ...known, ...fresh }, 60 * 60 * 24 * 30);
   const all = { ...known, ...fresh };
-  const names = new Map<string, string>();
+  const names = new Map<string, string[]>();
   let missing = 0;
   for (const c of cells) {
     const n = all[cellKey(c.lat, c.lon)];

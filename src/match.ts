@@ -371,21 +371,31 @@ export async function matchNeighborhoods(
     trace.push({ step: "Areas", detail: `Qloo found ${found.length} places that match your food and activity tastes; grouped them by Qloo neighborhood` });
   }
 
-  // Name each area from Qloo's own neighborhood field; OpenStreetMap (Photon) only where Qloo has none.
-  // A neighborhood named like the city itself ("Brooklyn" in Brooklyn) says nothing; skip it.
+  // Name each area from Qloo's own neighborhood field, counting only the places inside the area's own square: the
+  // places found within 1.2 km reach across a river or a park ("Georgetown" for Rosslyn, measured in Arlington).
+  // Else OpenStreetMap (Photon) at the area; else the places around it. Places a newcomer can't visit don't name an area
+  // (live: a ferry terminal Qloo files under Manhattan's "Whitehall" named a Brooklyn square). A neighborhood named like
+  // the city itself ("Brooklyn" in Brooklyn) or a ward number ("Ward 2", Qloo's name for the National Mall) says
+  // nothing; skip it.
   const cityWords = new Set([center.name.split(",")[0], qlooCity?.split(",")[0] ?? ""].map(nameKey).filter(Boolean));
-  for (const h of hoods)
-    if (!h.name) h.name = mostCommon([...h.evidence, ...h.matches].map((e) => e.neighborhood).filter((n): n is string => !!n && !cityWords.has(nameKey(n)))) ?? "";
-  for (const h of hoods) if (cityWords.has(nameKey(h.name))) h.name = "";
+  const says = (n: string | undefined): n is string => !!n && !cityWords.has(nameKey(n)) && !/^ward \d+$/i.test(n.trim());
+  const step = areaStep(cellLength(heat.points));
+  const inSquare = (h: Neighborhood, e: Entity) => !step || (e.lat !== undefined && e.lon !== undefined && Math.floor(e.lat / step) === Math.floor(h.lat / step) && Math.floor(e.lon / step) === Math.floor(h.lon / step));
+  const byPlaces = (ps: Entity[]) => mostCommon(ps.filter(visitable).map((e) => e.neighborhood).filter(says)) ?? "";
+  for (const h of hoods) if (!h.name) h.name = byPlaces([...h.evidence, ...h.matches].filter((e) => inSquare(h, e)));
+  for (const h of hoods) if (!says(h.name)) h.name = "";
   const unnamed = hoods.filter((h) => !h.name);
   if (unnamed.length) {
     const r = await namesFor(env.CACHE, budget, center.name, unnamed, 3);
-    for (const h of unnamed) h.name = r.names.get(cellKey(h.lat, h.lon)) ?? "";
-    if (r.missing) trace.push({ step: "Name", detail: `${r.missing} area${r.missing === 1 ? "" : "s"} had no neighborhood name in Qloo or OpenStreetMap and ${r.missing === 1 ? "was" : "were"} left out` });
+    for (const h of unnamed) {
+      h.name = (r.names.get(cellKey(h.lat, h.lon)) ?? []).find(says) ?? byPlaces([...h.evidence, ...h.matches]);
+    }
+    const missing = unnamed.filter((h) => !h.name).length;
+    if (missing) trace.push({ step: "Name", detail: `${missing} area${missing === 1 ? "" : "s"} had no neighborhood name in Qloo or OpenStreetMap and ${missing === 1 ? "was" : "were"} left out` });
   }
   hoods = mergeByName(hoods.filter((h) => h.name), mode).slice(0, 5);
   if (!hoods.length) throw new AppError(`Qloo scored ${center.name}, but none of the top areas could be named. Please try again later.`, 502);
-  trace.push({ step: "Name", detail: `Named the areas from Qloo's place data (the neighborhood of the places found there)${unnamed.length ? `; OpenStreetMap for ${unnamed.length} without one` : ""}` });
+  trace.push({ step: "Name", detail: `Named the areas from Qloo's place data (the neighborhood of the places inside each area)${unnamed.length ? `; OpenStreetMap for ${unnamed.length} without one` : ""}` });
 
   // 5. Your kinds of places (found before the ranking) go under the neighborhood within reach. Qloo's
   // city filter reaches a bit past the city: a Manhattan bar must not be listed under Williamsburg.
@@ -403,7 +413,7 @@ export async function matchNeighborhoods(
     trace.push({ step: "Your places", detail: `Qloo found ${cityMatches.length} places in the city that are one of your food or activity tastes; ${kept} are in the neighborhoods shown` });
   }
   const dropped = dedupeEvidence(hoods);
-  if (dropped) trace.push({ step: "Filter", detail: `Left out ${dropped} ${dropped === 1 ? "place" : "places"} a newcomer can't visit (schools, offices, places of worship, stations, studios and the like)` });
+  if (dropped) trace.push({ step: "Filter", detail: `Left out ${dropped} ${dropped === 1 ? "place" : "places"} a newcomer can't visit (schools, offices, places of worship, stations, airports, studios and the like)` });
 
   // 6. A weekend to test the move before signing a lease: one place per part of the day, from
   // Qloo's time-of-day fit for each place.
@@ -426,14 +436,14 @@ export async function matchNeighborhoods(
       "Qloo affinities describe what groups of people in an area tend to like, not what any one person will do or feel.",
       "Taste fit is one input. Rent, commute, schools and safety are not part of this result.",
       "Food and activity tastes choose the places shown and give a small boost to areas near them; Qloo's taste map itself comes from artists, shows, films, books, podcasts and genres.",
-      "Neighborhood names are Qloo's (from its place data) and may not match local usage exactly.",
+      "Neighborhood names are Qloo's (from the places inside each area), or OpenStreetMap's where Qloo has none there, and may not match local usage exactly.",
     ],
     ours: [
       mode === "map"
         ? "Areas are squares of about 1 km (2.4 km where Qloo's cells are coarser) ranked by the mean Qloo percentile of all their map cells, so one hot block can't outrank a whole hot area, plus 0.03 for each of your kinds of places within reach, up to three (Newcomer's rules)."
         : "With only food and activity tastes, neighborhoods are ranked by how many matching places Qloo found there (Newcomer's rule).",
       "Each weekend stop is the best-ranked place for that part of the day by Qloo's time-of-day tags; tattoo shops, salons and hotels are skipped unless they serve food or drink (Newcomer's rules).",
-      "Schools, offices, places of worship, transit stations, recording studios and similar places are left out of the lists, since a newcomer can't visit them (Newcomer's rule).",
+      "Schools, offices, places of worship, transit stations and airports, recording studios and similar places are left out of the lists, since a newcomer can't visit them (Newcomer's rule).",
       ...(unsure.length ? ["Where a name wasn't one exact match, the first Qloo candidate that resembles it was used; you can pick another."] : []),
     ],
     degraded,
@@ -567,7 +577,7 @@ function dedupeEvidence(hoods: Neighborhood[]): number {
 }
 
 // Judged on Qloo's categories only: a venue's name ("The Garage", "Temple Bar") says nothing.
-const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|municipal|department of|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office|business center|senior citizen|(subway|train|railway|metro|bus|transit) station)\b/i;
+const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|municipal|department of|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office|business center|senior citizen|(subway|train|railway|metro|bus|transit) station|ferry terminal|airport)\b/i;
 const visitable = (e: Entity) => !NOT_VISITABLE.test((e.tags ?? []).join(" | "));
 
 async function inBatches<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {

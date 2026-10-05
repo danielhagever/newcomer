@@ -365,6 +365,15 @@ export const T = [
   ["Vacation (National Lampoon's European Vacation)", "movie", title("National Lampoon's European Vacation")],
   ["Joe's Pizza (Brooklyn)", "place", (l) => l.includes("Brooklyn")],
   ["The Stranger (2016)", "book", (l) => l.startsWith("The Stranger (2016")], // a year is read exactly: not Coben's 2015
+  // Titles written with Qloo's own series note, and authors of a title that starts with the name (pass 31, recorded
+  // 2026-10-05).
+  ["Beloved (Beloved Trilogy, #1)", "book", (l) => l.startsWith("Beloved") && l.includes("Toni Morrison")],
+  ["Dune (Dune, #1)", "book", (l) => l.startsWith("Dune (Dune, #1)") && l.includes("Frank Herbert")],
+  ["Thief of Time (Discworld, #26)", "book", (l) => l.startsWith("Thief of Time") && l.includes("Terry Pratchett")],
+  ["The Hobbit (J.R.R. Tolkien)", "book", (l) => l.startsWith("The Hobbit") && l.includes("J.R.R. Tolkien")],
+  ["The Hobbit (J. R. R. Tolkien)", "book", (l) => l.startsWith("The Hobbit") && l.includes("J.R.R. Tolkien")],
+  ["The Hobbit (by Tolkien)", "book", (l) => l.startsWith("The Hobbit") && l.includes("Tolkien")],
+  ["Cross Fire (Alex Cross, #17)", "book", (l) => l.startsWith("Cross Fire") && l.includes("Patterson")], // Qloo writes "James  Patterson"
   ["Vacation (National Lampoon's Vacation)", "movie", title("National Lampoon's Vacation")],
   ["Dracula (Bram Stoker's Dracula)", "movie", at("dracula", "1992")], // corrected after recording: Qloo names Bram Stoker's Dracula plain "Dracula" (1992)
   ["Vacation (National Lampoon\u2019s Vacation)", "movie", title("National Lampoon's Vacation")], // a curly apostrophe, as phones type it

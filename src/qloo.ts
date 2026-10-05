@@ -60,9 +60,10 @@ export class QlooError extends AppError {}
 // over 20 s, so waiting helps more than asking again).
 const TIMEOUT_MS = 12000;
 export const HEATMAP_TIMEOUT_MS = 40000;
-// All of a search's Qloo calls share 50 s: each waits at most what is left, so a slow heatmap, the 25 km one
-// after it and a retry can't keep an agent waiting past a client's usual 60 s limit.
-const TOTAL_MS = 50000;
+// All of a search's Qloo calls share 45 s: each waits at most what is left, so a slow heatmap, the 25 km one
+// after it and a retry can't keep an agent waiting past a client's usual 60 s limit (OpenStreetMap's area names,
+// asked six at a time after the Qloo calls, take 5 s a round, rarely two).
+const TOTAL_MS = 45000;
 
 // Qloo answers 429 to the sixth call within about a second (measured 2026-10-03 after a quiet minute:
 // 5 at once all 200, 6 at once lose one, 8 lose three; a steady 4 a second loses the sixth call every
