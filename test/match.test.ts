@@ -320,6 +320,8 @@ test("an area is named by the places inside its own square, else OpenStreetMap, 
   assert.equal(await run({ inside: "University\u2014Rosedale", around: "Georgetown" }), "Rosslyn"); // an electoral district, Qloo's in Toronto
   assert.equal(await run({ inside: "Ginza 8-chome", around: "Georgetown" }), "Ginza"); // a block number is an address (Tokyo, live)
   assert.equal(await run({ inside: "Ginza 8-chome", around: "Georgetown", city: tokyo }), "Ginza");
+  assert.equal(await run({ inside: "Kabukichō 1-chōme", city: tokyo }), "Kabukichō"); // with its long vowel (live)
+  assert.equal(await run({ inside: "Kabukichō 1-chōme" }), "Kabukichō");
   assert.equal(await run({ osm: { district: "Roppongi 7" }, city: tokyo }), "Roppongi");
   assert.equal(await run({ inside: "鉄鋼通り三丁目", city: tokyo }), "鉄鋼通り"); // Qloo's own, in kanji
   assert.equal(await run({ inside: "紀尾井町1", city: tokyo }), "紀尾井町");

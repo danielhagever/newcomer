@@ -394,7 +394,8 @@ export async function matchNeighborhoods(
   // 10" in Guatemala City), so only the "-chome" form is dropped.
   // Qloo writes some in Japanese, with the number in kanji or straight after the name ("鉄鋼通り三丁目", "紀尾井町1").
   const japan = /\bJapan\b/i.test(center.name);
-  const clean = (n: string) => n.replace(japan ? /\s*\d+(?:-chome)?$|[一二三四五六七八九十]+丁目$/i : /\s+\d+-chome$/i, "");
+  // "chōme" is written with or without its long vowel ("Kabukichō 1-chōme", live).
+  const clean = (n: string) => n.replace(japan ? /\s*\d+(?:-ch[oō]me)?$|[一二三四五六七八九十]+丁目$/i : /\s+\d+-ch[oō]me$/i, "");
   // Names are counted once cleaned: "Ebisu nishi 1" and "Ebisu nishi 2" outnumber "Ebisu minami 1" (Tokyo, live).
   const byPlaces = (ps: Entity[]) => mostCommon(ps.filter(visitable).map((e) => e.neighborhood).filter(says).map(clean)) ?? "";
   // An area with an airport or a travel lounge inside it is the airport, not a neighborhood (live: Sydney's Mascot square,
