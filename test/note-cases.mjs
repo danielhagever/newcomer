@@ -190,6 +190,16 @@ export const T = [
   ["Toy Story (2)", "movie", title("Toy Story 2")],
   ["Twilight (2)", "movie", title("The Twilight Saga: New Moon")],
   ["It (Chapter Two)", "movie", (l) => /^it:? chapter two( \(|$)/i.test(l)],
+  // pass 14 (written before recording): number-only notes in series with other numbers, remakes, unnamed firsts
+  ["Jurassic Park (2)", "movie", title("The Lost World: Jurassic Park")],
+  ["Planet of the Apes (2)", "movie", title("Beneath the Planet of the Apes")],
+  ["Mad Max (2)", "movie", (l) => /road warrior|^mad max 2/i.test(l)],
+  ["Indiana Jones (2)", "movie", title("Indiana Jones and the Temple of Doom")],
+  ["The Matrix (2)", "movie", title("The Matrix Reloaded")],
+  // Known limit: Qloo holds an unrelated 1980 film titled "Alien 2: On Earth", which reads exactly like a sequel ("Shrek 2").
+  ["Alien (2)", "movie", title("Aliens"), "an unrelated film is titled Alien 2"],
+  ["Terminator (2)", "movie", title("Terminator 2: Judgment Day")],
+  ["Die Hard (2)", "movie", title("Die Hard 2")],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],
