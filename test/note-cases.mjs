@@ -254,6 +254,11 @@ export const T = [
   ["Harry Potter (4)", "movie", title("Harry Potter and the Goblet of Fire")],
   ["Twilight (3)", "movie", title("The Twilight Saga: Eclipse")],
   ["Dune (3)", "movie", title("Dune: Part Three")],
+  // pass 22 (written before recording): a spelled-out number inside a title ("the Five Armies"); an older same-named film
+  ["The Hobbit (3)", "movie", title("The Hobbit: The Battle of the Five Armies"), "an older film named exactly The Hobbit (1977) starts the count, and Qloo's top answer is Toy Story 3"],
+  ["The Hobbit (2)", "movie", title("The Hobbit: The Desolation of Smaug")],
+  ["The Hobbit (1)", "movie", title("The Hobbit: An Unexpected Journey"), "an older film named exactly The Hobbit (1977) is the first by the count"],
+  ["Mission: Impossible (6)", "movie", title("Mission: Impossible - Fallout")],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],

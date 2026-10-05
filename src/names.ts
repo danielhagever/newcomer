@@ -86,7 +86,7 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 236 such inputs are recorded in test/note-fixtures.json):
+// live answers for 240 such inputs are recorded in test/note-fixtures.json):
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
@@ -115,15 +115,17 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 //   A note that is only a number (one to ten, as digits, words or Roman numerals) asks for the Nth: the title with that number right after the name ("Shrek (2)" is
 //   Shrek 2), or holding the name and that number ("The Fast and the Furious (2)" is 2 Fast 2 Furious); else Qloo's
 //   own top answer (its second, when the first is the film named exactly the name, only as a sequel not holding the
-//   name: "Knives Out (2)" is Glass Onion) when it carries no number but the asked one (a part's own number aside:
-//   "Mission: Impossible (7)" is Dead Reckoning Part One) and belongs to the series, holding the name or coming after
+//   name: "Knives Out (2)" is Glass Onion) when it carries no number but the asked one (a part's own other number
+//   only when the count below can't answer: "Mission: Impossible (7)" is Dead Reckoning Part One, but "Harry Potter
+//   (3)" is Prisoner of Azkaban, not Deathly Hallows: Part 2) and belongs to the series, holding the name or coming after
 //   the film named exactly the name ("Mad Max (2)" is The Road Warrior, "Fast & Furious (7)" Furious 7); else the Nth by year of the titles starting with the name, from the one named exactly that,
 //   titles numbered otherwise left out ("The Hunger Games (2)" is Catching Fire, not Mockingjay - Part 2). On a TV
 //   show a number or a season alone is a season of the show ("Skins (series 2)", "Squid Game (Season 2)" are the shows,
 //   not a making-of special). Known limits: an
 //   unrelated title that reads as a sequel wins ("Alien (2)" is Alien 2: On Earth, a 1980 film, not Aliens), and a
 //   film Qloo's searches never return can't be picked ("Batman (2)", "Harry Potter (7)"), and Qloo's own top answer
-//   is sometimes wrong ("Twilight (4)" is Breaking Dawn - Part 2). When the count by year falls short (a film missing
+//   is sometimes wrong ("Twilight (4)" is Breaking Dawn - Part 2), and an older film named exactly the name starts
+//   the count ("The Hobbit (1)" is the 1977 TV film). When the count by year falls short (a film missing
 //   from Qloo's answers), Qloo's second answer may stand as a title starting with the name ("Twilight (5)"). Kind words at the end of a note only say what it is ("(Raiders of the Lost Ark film)"). A title holding the
 //   name and the note that isn't taken is offered first under "Not it?", and otherwise only entries holding the
 //   name are offered ("Dune (Part Two)" isn't offered The Godfather Part II);
