@@ -9,7 +9,7 @@
 // - every place carries Qloo's own neighborhood name and time-of-day fit.
 
 import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type QlooEnv, type Signals, type Tag } from "./qloo.ts";
-import { nameKey as typedName, rankNames, resembles, together, withoutNote } from "./names.ts";
+import { forSearch, nameKey as typedName, rankNames, resembles, together, withoutNote } from "./names.ts";
 export { resembles };
 import { cityCenter, cellKey, km, namesFor } from "./geo.ts";
 import { AppError, type Budget } from "./limits.ts";
@@ -124,7 +124,7 @@ const term = (it: Interest) => it.query ?? it.name;
 const SPARE_FOR_NAMES = 20;
 
 async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Resolved | null> {
-  const found = await q.search(term(it), type, 5);
+  const found = await q.search(forSearch(term(it)), type, 5);
   let ranked = rankNames(found, term(it));
   // With a note in brackets, the name alone is searched too when that may find a better entry (see Ranked), but
   // only while the request has calls to spare for the map and the area names (measured: 8 films with a note

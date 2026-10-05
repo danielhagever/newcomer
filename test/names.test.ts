@@ -2,7 +2,7 @@
 // with Booker; its venue and list cases don't apply here and are skipped). Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rankNames, together, withoutNote } from "../src/names.ts";
+import { forSearch, rankNames, together, withoutNote } from "../src/names.ts";
 import { readFileSync } from "node:fs";
 // @ts-ignore: plain JavaScript table
 import cases from "./name-cases.mjs";
@@ -62,6 +62,8 @@ const NOTES: [string, any[], string][] = [
   // A title starts with the name with small words aside ("The Fast and the Furious" starts with "Fast & Furious"),
   // even next to an entry named exactly the name (Qloo's real titles).
   ["Fast & Furious (Tokyo)", [film("Fast & Furious", "2009"), film("The Fast and the Furious: Tokyo Drift", "2006")], "The Fast and the Furious: Tokyo Drift (2006) closest"],
+  // The title holding more of the note's words wins: "Rogue One" holds a 1 too, but not "Episode".
+  ["Star Wars (Episode 1)", [film("Rogue One: A Star Wars Story", "2016"), film("Star Wars: Episode I - The Phantom Menace", "1999"), film("Star Wars: Episode IV - A New Hope", "1977")], "Star Wars: Episode I - The Phantom Menace (1999) closest"],
   // A one-word note is never the name of another title: "Phoenix" is the actor here, though a 2014 film is named that.
   ["Joker (Phoenix)", [film("Joker", "2019"), film("Phoenix", "2014")], "Joker (2019) closest"],
   // Nothing before the note, or nothing like it: no guess.
@@ -81,7 +83,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 160 realistic inputs get the entry a reasonable person expects", async () => {
+test("notes in brackets on Qloo's live answers: 168 realistic inputs get the entry a reasonable person expects", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -89,7 +91,7 @@ test("notes in brackets on Qloo's live answers: 160 realistic inputs get the ent
   let searches = 0;
   for (const [input, kind, want] of T) {
     // The same flow as resolveEntity: the whole text, then the name alone when that may find a better entry.
-    const whole = F[`${kind}|${input}`];
+    const whole = F[`${kind}|${forSearch(input)}`];
     let r = rankNames(whole, input);
     searches++;
     if (withoutNote(input) !== input && (!r || r.searchName)) {
@@ -100,7 +102,7 @@ test("notes in brackets on Qloo's live answers: 160 realistic inputs get the ent
     if (!want(got)) wrong.push(`${input} -> ${got}`);
   }
   assert.deepEqual(wrong, []);
-  assert.ok(searches <= 207, `${searches} Qloo searches for 160 names`);
+  assert.ok(searches <= 217, `${searches} Qloo searches for 168 names`);
 });
 
 test("when the exact name wins, the title named in the note is offered first under Not it? (Qloo's live answers)", () => {
@@ -109,4 +111,12 @@ test("when the exact name wins, the title named in the note is offered first und
     const r = rankNames(together(F[`${kind}|${input}`], F[`${kind}|${withoutNote(input)}`]), input)!;
     assert.equal(r.list.filter((e) => e !== r.pick && r.offered(e))[0]?.name, offered, input);
   }
+});
+
+test("a number word after a part word is searched as a digit (Qloo finds Episode 1, not Episode One); the rest stays", () => {
+  assert.equal(forSearch("Star Wars (Episode One)"), "Star Wars (Episode 1)");
+  assert.equal(forSearch("Dune (Part Two)"), "Dune (Part 2)");
+  assert.equal(forSearch("Kill Bill (Vol. Two)"), "Kill Bill (Vol. 2)");
+  assert.equal(forSearch("Fast & Furious (Fast Five)"), "Fast & Furious (Fast Five)");
+  assert.equal(forSearch("Part One Records"), "Part One Records");
 });
