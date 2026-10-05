@@ -113,7 +113,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 279 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
+test("notes in brackets on Qloo's live answers: 296 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -135,12 +135,12 @@ test("notes in brackets on Qloo's live answers: 279 realistic inputs get the ent
   }
   // Every miss is a known limit, and every known limit still misses (so a fix there is noticed).
   assert.deepEqual(wrong, known);
-  assert.ok(searches <= 352, `${searches} Qloo searches for 279 names`);
+  assert.ok(searches <= 369, `${searches} Qloo searches for 296 names`);
 });
 
 test("when the exact name wins, the title named in the note is offered first under Not it? (Qloo's live answers)", () => {
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
-  for (const [input, kind, offered] of [["Chicago P.D. (Chicago Fire)", "tv_show", "Chicago Fire"], ["Better Call Saul (Breaking Bad)", "tv_show", "Breaking Bad"], ["Fuller House (Full House)", "tv_show", "Full House"], ["House of the Dragon (Game of Thrones)", "tv_show", "Game of Thrones"], ["Amy (Amy Winehouse)", "movie", "Amy Winehouse"], ["Amy (Winehouse documentary)", "movie", "Amy Winehouse"], ["Whitney (Whitney Houston)", "movie", "Whitney Houston: I Wanna Dance with Somebody"], ["Fear the Walking Dead (The Walking Dead)", "tv_show", "The Walking Dead"], ["That '90s Show (That '70s Show)", "tv_show", "That '70s Show"]]) {
+  for (const [input, kind, offered] of [["Chicago P.D. (Chicago Fire)", "tv_show", "Chicago Fire"], ["Better Call Saul (Breaking Bad)", "tv_show", "Breaking Bad"], ["Fuller House (Full House)", "tv_show", "Full House"], ["House of the Dragon (Game of Thrones)", "tv_show", "Game of Thrones"], ["Amy (Amy Winehouse)", "movie", "Amy Winehouse"], ["Amy (Winehouse documentary)", "movie", "Amy Winehouse"], ["Whitney (Whitney Houston)", "movie", "Whitney Houston: I Wanna Dance with Somebody"], ["Fear the Walking Dead (The Walking Dead)", "tv_show", "The Walking Dead"], ["That '90s Show (That '70s Show)", "tv_show", "That '70s Show"], ["Halloween (Halloween Kills)", "movie", "Halloween Kills"]]) {
     const r = rankNames(together(F[`${kind}|${input}`], F[`${kind}|${withoutNote(input)}`]), input)!;
     assert.equal(r.list.filter((e) => e !== r.pick && r.offered(e))[0]?.name, offered, input);
   }

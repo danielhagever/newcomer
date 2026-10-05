@@ -118,7 +118,12 @@ export class Qloo {
       if ((e as Error)?.name === "TimeoutError") throw new QlooError("Qloo took too long to answer. Please try again.", 504);
       throw new QlooError("Couldn't reach Qloo. Please try again.", 502);
     }
-    const body: any = await res.json().catch(() => ({}));
+    // The time limit covers reading the answer too: an answer cut off by it is a timeout, not an empty one.
+    const body: any = await res.json().catch((e) => {
+      if ((e as Error)?.name !== "TimeoutError") return {};
+      this.calls.push({ path, params, status: 0, ms: Date.now() - t, count: 0 });
+      throw new QlooError("Qloo took too long to answer. Please try again.", 504);
+    });
     const count = Array.isArray(body?.results)
       ? body.results.length
       : (body?.results?.entities?.length ?? body?.results?.heatmap?.length ?? body?.results?.tags?.length ?? 0);

@@ -307,6 +307,26 @@ export const T = [
   // A hyphen inside a name is not a separator ("X-Men Origins: Wolverine" is X-Men, then Origins, then the note).
   ["X-Men (Wolverine)", "movie", title("X-Men Origins: Wolverine")],
   ["Ant-Man (Quantumania)", "movie", title("Ant-Man and the Wasp: Quantumania")],
+  // A note that is a title holding the whole name plus words, with capitals, "of" or an ordinal after the name (pass 28,
+  // recorded 2026-10-05).
+  ["Halloween (Halloween Kills)", "movie", title("Halloween Kills"), "a note adding a plain word to the whole name reads as a fuller name, like \"Amy (Amy Winehouse)\"; Halloween Kills is offered first"],
+  ["Shrek (Shrek the Third)", "movie", title("Shrek the Third")],
+  ["Toy Story (Toy Story of Terror)", "movie", (l) => l.startsWith("Toy Story of Terror")],
+  ["Love Island (Love Island USA)", "tv_show", (l) => l.startsWith("Love Island USA")],
+  ["Law & Order (Law & Order SVU)", "tv_show", (l) => l.startsWith("Law & Order: Special Victims Unit")],
+  ["Law & Order (SVU)", "tv_show", (l) => l.startsWith("Law & Order: Special Victims Unit")],
+  ["NCIS (LA)", "tv_show", (l) => l.startsWith("NCIS: Los Angeles")],
+  ["Lawrence (Lawrence of Arabia)", "movie", (l) => l.startsWith("Lawrence of Arabia")],
+  ["Elizabeth (Elizabeth the First)", "movie", at("elizabeth", "1998")], // the film about her; a fuller name
+  ["Rocky (Rocky the Fourth)", "movie", (l) => l.startsWith("Rocky IV")],
+  // Notes typed in capitals, and fuller names with "of" or an ordinal.
+  ["Star Wars (THE EMPIRE STRIKES BACK)", "movie", (l) => l.startsWith("Star Wars: Episode V - The Empire Strikes Back")],
+  ["Harry Potter (PRISONER OF AZKABAN)", "movie", title("Harry Potter and the Prisoner of Azkaban")],
+  ["The Office (US)", "tv_show", at("the office", "2005")],
+  ["The Office (UK)", "tv_show", at("the office", "2001")],
+  ["Joan (Joan of Arc)", "movie", (l) => l.startsWith("Joan of Arc")],
+  ["Mary (Mary Queen of Scots)", "movie", (l) => l.startsWith("Mary Queen of Scots")],
+  ["Henry (Henry the Fifth)", "movie", title("Henry V"), "Qloo's searches never return Henry V, and its top answer Hardcore Henry is taken"],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],

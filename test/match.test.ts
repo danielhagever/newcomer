@@ -155,14 +155,34 @@ test("the heatmap waits 25 s for Qloo, its retry after a 429 too, every other Ql
   }
 });
 
-test("a Qloo call that runs out of time says so, never 'not found'", async () => {
-  const m = mockFetch(standardQloo());
+test("a Qloo call that runs out of time says so, never 'not found' or 'no taste map', even when the answer was cut off midway", async () => {
+  const timeout = () => new DOMException("The operation was aborted due to timeout", "TimeoutError");
+  // Headers came, then the time ran out while the answer was still arriving (as a stalled server does in Node).
+  const cutOff = () => Promise.resolve(new Response(new ReadableStream({ start: (c) => c.error(timeout()) }), { status: 200 }));
+  const isHeat = (u: URL) => u.searchParams.get("filter.type") === "urn:heatmap";
+  const isSearch = (u: URL) => u.pathname === "/search";
+  for (const [what, hit, fail] of [["heatmap never answered", isHeat, () => Promise.reject(timeout())], ["heatmap cut off", isHeat, cutOff], ["search cut off", isSearch, cutOff]] as const) {
+    const m = mockFetch(standardQloo());
+    const mocked = globalThis.fetch;
+    globalThis.fetch = ((input: any, init?: RequestInit) => (hit(new URL(String(input))) ? fail() : mocked(input, init))) as typeof fetch;
+    try {
+      const { kv } = memoryKV();
+      await assert.rejects(matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]), (e: AppError) => /took too long/.test(e.message) && e.status === 504, what);
+    } finally {
+      globalThis.fetch = mocked;
+      m.restore();
+    }
+  }
+});
+
+test("an answer that isn't JSON (a gateway's error page) is reported with Qloo's status, not as a timeout", async () => {
+  const m = mockFetch(() => undefined);
   const mocked = globalThis.fetch;
   globalThis.fetch = ((input: any, init?: RequestInit) =>
-    new URL(String(input)).searchParams.get("filter.type") === "urn:heatmap" ? Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError")) : mocked(input, init)) as typeof fetch;
+    new URL(String(input)).host === "qloo.test" ? Promise.resolve(new Response("<html>502 Bad Gateway</html>", { status: 502 })) : mocked(input, init)) as typeof fetch;
   try {
     const { kv } = memoryKV();
-    await assert.rejects(matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]), (e: AppError) => /took too long/.test(e.message) && e.status === 504);
+    await assert.rejects(matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]), (e: AppError) => /Qloo answered 502/.test(e.message) && e.status === 502);
   } finally {
     globalThis.fetch = mocked;
     m.restore();
@@ -260,6 +280,29 @@ test("the same interest twice is looked up once", async () => {
     const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "phoebe bridgers", kind: "artist" }]);
     assert.equal(m.calls.filter((c) => c.path === "/search").length, 1);
     assert.equal(r.resolved.length, 1);
+  } finally {
+    m.restore();
+  }
+});
+
+test("a video game is searched as Qloo's urn:entity:videogame (it answers 400 to video_game) and labeled a game", async () => {
+  const std = standardQloo();
+  const m = mockFetch((c) => {
+    if (qloo(c) && c.path === "/search" && c.params.get("query") === "Minecraft")
+      return c.params.get("types") === "urn:entity:videogame"
+        ? { body: { results: [
+            { entity_id: UUID(7), name: "Minecraft", disambiguation: "2011-11-18, Mojang AB", types: ["urn:entity:videogame"] },
+            { entity_id: UUID(8), name: "Minecraft Dungeons", disambiguation: "2020-05-26, Mojang AB", types: ["urn:entity:videogame"] },
+          ] } }
+        : { status: 400, body: { error: { message: "types/0: must be equal to one of the allowed values" } } };
+    return std(c);
+  });
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Minecraft", kind: "video_game" }, { name: "Phoebe Bridgers", kind: "artist" }]);
+    const game = r.resolved.find((x) => x.input === "Minecraft")!;
+    assert.equal(game?.match, "exact");
+    assert.deepEqual(game.alternatives.map((a) => a.type), ["game"]);
   } finally {
     m.restore();
   }

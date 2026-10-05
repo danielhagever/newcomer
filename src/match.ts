@@ -81,7 +81,7 @@ const ENTITY_TYPES: Record<string, string> = {
   tv_show: "urn:entity:tv_show",
   book: "urn:entity:book",
   podcast: "urn:entity:podcast",
-  video_game: "urn:entity:video_game",
+  video_game: "urn:entity:videogame", // Qloo answers 400 to "video_game" (measured 2026-10-05)
   brand: "urn:entity:brand",
   place: "urn:entity:place",
 };
@@ -115,7 +115,7 @@ const canAct = (t: Tag) => (placeFamily(t.id) ? placeTag(t) : musicTag(t) || med
 
 const TYPE_WORD: Record<string, string> = {
   "urn:entity:artist": "artist", "urn:entity:movie": "film", "urn:entity:tv_show": "TV show", "urn:entity:book": "book",
-  "urn:entity:podcast": "podcast", "urn:entity:video_game": "game", "urn:entity:brand": "brand", "urn:entity:place": "place",
+  "urn:entity:podcast": "podcast", "urn:entity:videogame": "game", "urn:entity:brand": "brand", "urn:entity:place": "place",
 };
 const choice = (e: Entity): Choice => ({ id: e.id, name: label(e), type: TYPE_WORD[e.types[0] ?? ""] ?? "entity" });
 

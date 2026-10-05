@@ -86,7 +86,7 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 279 such inputs are recorded in test/note-fixtures.json):
+// live answers for 296 such inputs are recorded in test/note-fixtures.json):
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
@@ -99,27 +99,29 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 // - when an entry is named exactly the name (or one letter off, two in a long name: "Better Call Saull"; or with its
 //   number written otherwise: "Fantastic 4"), it wins
 //   over a title named in the note, which is offered first under "Not it?" ("Better Call Saul (Breaking Bad)",
-//   "Chicago P.D. (Chicago Fire)"; a note adding only a number (one to ten) to the name's words is a sequel instead: "Fast &
-//   Furious (Fast Five)" is Fast Five); and a title must continue
+//   "Chicago P.D. (Chicago Fire)"; a note adding a number to the name's words is a sequel instead: "Fast & Furious
+//   (Fast Five)" is Fast Five); and a title must continue
 //   the name after a separator, a linking word or a number ("Star Wars: Episode V", "The Fast and the Furious: Tokyo
 //   Drift", "Harry Potter and the...", "The Godfather Part II"), or start with the note that way and hold the name
 //   ("Furiosa: A Mad Max Saga", "The Lost World: Jurassic Park", "War for the Planet of the Apes"): "The Mandalorian
 //   (Star Wars)" is not Lego Star Wars: The Mandalorian, and "Amy (Winehouse documentary)" is not Amy Winehouse. A
 //   note holding the whole name plus words is a fuller name, not a subtitle ("Amy (Amy Winehouse)" is Amy, 2015),
 //   unless it adds a number ("Toy Story (Toy Story 3)", "(The Hunger Games: Mockingjay Part 1)", "Blade Runner
-//   (Blade Runner 2049)", "Godzilla (Godzilla Minus One)": then the title named exactly the note is taken), continues
-//   the name with "and" or a linking word ("Deadpool (Deadpool & Wolverine)", "Bad Boys (Bad Boys for Life)"), or
-//   continues the name after a separator ("Mad Max (Mad Max: Fury Road)"; such a note is read from after the name: "Twilight
+//   (Blade Runner 2049)", "Godzilla (Godzilla Minus One)": then the title named exactly the note is taken) or a word
+//   in capitals ("Love Island (Love Island USA)", "Law & Order (Law & Order SVU)"), continues the name with "and",
+//   "of" or a linking word ("Deadpool (Deadpool & Wolverine)", "Toy Story (Toy Story of Terror)", "Bad Boys (Bad Boys
+//   for Life)"), or continues the name after a separator ("Mad Max (Mad Max: Fury Road)"; such a note is read from after the name: "Twilight
 //   (Twilight: New Moon)" is New Moon; a name ending in "!" counts as followed by one: "Mamma Mia (Mamma Mia! Here We Go
 //   Again)"), nor is a note shaped like a title ("Planet of the Apes (Rise of the Planet of the Apes)") or naming
 //   exactly a found title with a separator ("Jurassic Park (The Lost World Jurassic Park)"). A title that is a later part of the note's own title gives way to the entry
 //   named exactly the note ("Rambo (First Blood)" is First Blood, not Rambo: First Blood Part II). Linking words
 //   ("to", "in", "presents") and part words ("Part", "Vol.") are skipped: "Back to the Future (Part 2)" is Back to
 //   the Future Part II, "Toy Story (Part 3)" Toy Story 3, "Fast & Furious (Hobbs & Shaw)" Fast & Furious Presents:
-//   Hobbs & Shaw. A franchise's own words may come before the separator ("Twilight (New Moon)" is The Twilight
-//   Saga: New Moon), the title holding more of the note's words wins ("Star Wars (Episode 1)" is Episode I, not
-//   Rogue One), and kind words in the note hide nothing ("SpongeBob (movie)" is The SpongeBob SquarePants Movie).
-//   A note that is only a number (one to ten, as digits, words or Roman numerals, or an ordinal: "Shrek (2nd film)")
+//   Hobbs & Shaw. A franchise's own words may come after the name, before the separator ("Twilight (New Moon)" is
+//   The Twilight Saga: New Moon; "Law & Order (SVU)" is not The Paley Center Salutes Law & Order: SVU), the title holding more of the note's words wins ("Star Wars (Episode 1)" is Episode I, not
+//   Rogue One), a word in capitals may be a title's initials ("Law & Order (SVU)" is Special Victims Unit, "NCIS (LA)"
+//   NCIS: Los Angeles), and kind words in the note hide nothing ("SpongeBob (movie)" is The SpongeBob SquarePants Movie).
+//   A note that is only a number (one to ten, as digits, words or Roman numerals, or an ordinal: "Shrek (2nd film)", also after the name: "Shrek (Shrek the Third)")
 //   asks for the Nth: the title with that number right after the name ("Shrek (2)" is
 //   Shrek 2), or holding the name and that number ("The Fast and the Furious (2)" is 2 Fast 2 Furious); else Qloo's
 //   own top answer (its second, when the first is the film named exactly the name, only as a sequel not holding the
@@ -131,9 +133,10 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 //   show a number or a season alone is a season of the show ("Skins (series 2)", "Squid Game (Season 2)" are the shows,
 //   not a making-of special). Known limits: an
 //   unrelated title that reads as a sequel wins ("Alien (2)" is Alien 2: On Earth, a 1980 film, not Aliens), and a
-//   film Qloo's searches never return can't be picked ("Batman (2)", "Harry Potter (7)"), and Qloo's own top answer
+//   film Qloo's searches never return can't be picked ("Batman (2)", "Harry Potter (7)", "Henry (Henry the Fifth)"), and Qloo's own top answer
 //   is sometimes wrong ("Twilight (4)" is Breaking Dawn - Part 2), and an older film named exactly the name starts
-//   the count ("The Hobbit (1)" is the 1977 TV film). When the count by year falls short (a film missing
+//   the count ("The Hobbit (1)" is the 1977 TV film), and a title holding the name plus a plain word reads as a fuller
+//   name ("Halloween (Halloween Kills)" is Halloween; Halloween Kills is offered first). When the count by year falls short (a film missing
 //   from Qloo's answers), Qloo's second answer may stand as a title starting with the name ("Twilight (5)"). Kind words at the end of a note only say what it is ("(Raiders of the Lost Ark film)"). A title holding the
 //   name and the note that isn't taken is offered first under "Not it?", and otherwise only entries holding the
 //   name are offered ("Dune (Part Two)" isn't offered The Godfather Part II);
@@ -247,10 +250,14 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   if (all?.match === "exact") return { ...all, offered: (e) => all.offered(e) && holdsName(e) };
   const aka = AKA.exec(NOTE.exec(input)![1]);
   const rawNote = NOTE.exec(input)![1].slice(aka?.[0].length ?? 0).trim();
-  const ordinal = ordinalOf(rawNote);
+  // An ordinal after the name is its number too ("Shrek (Shrek the Third)", "Rocky (Rocky the Fourth)").
+  const afterName = wordsAfter(rawNote, named);
+  const ordinal = ordinalOf(rawNote) ?? (afterName?.length ? ordinalOf(afterName.join(" ")) : null);
   const noted = ordinal ? String(ordinal) : trimKind(rawNote);
   // The note's words that aren't already in the name ("Chance the Rapper (rapper)" adds nothing).
-  const told = words(noted).filter((w) => !SMALL.has(w) && !closeTo(w, named, false));
+  // A word in capitals is an abbreviation, never a small word ("NCIS (LA)" is not "la").
+  const caps = new Set((rawNote.match(/\b[A-Z]{2,}\b/g) ?? []).map((w) => w.toLowerCase()));
+  const told = words(noted).filter((w) => (!SMALL.has(w) || caps.has(w)) && !closeTo(w, named, false));
   const holds = (e: Entity, ws: string[]) => !!ws.length && ws.every((w) => closeTo(w, words(e.name), false));
   // Kind words don't make an entry the note's ("SpongeBob (movie)" keeps The SpongeBob Movie).
   // As written (number forms and short forms aside), like the title rule below: a typo-tolerant match would hide
@@ -278,31 +285,35 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   const at = named.length ? nw.findIndex((w) => sameWord(w, named[0])) : -1;
   const titleShaped = (at > 0 && (SMALL.has(nw[at - 1]) || LINKS.has(nw[at - 1])));
   const namesTitle = found.some((e) => nameKey(e.name) === nameKey(noted) && (after(e.name, named) === "sep" || SEPARATOR.test(e.name)));
-  // Any number counts ("Blade Runner (Blade Runner 2049)"), and so does a note continuing the name with "and" or a
-  // linking word ("Deadpool (Deadpool & Wolverine)", "Bad Boys (Bad Boys for Life)"; not "Alexander (Alexander the
-  // Great)").
-  const addsNumber = told.some((w) => NUMBER.has(w) || /\d/.test(w));
+  // A person's name never adds a number ("Blade Runner (Blade Runner 2049)") or a word in capitals ("Love Island
+  // (Love Island USA)"), nor continues with "and", "of" or a linking word ("Deadpool (Deadpool & Wolverine)", "Toy
+  // Story (Toy Story of Terror)", "Bad Boys (Bad Boys for Life)"; not "Alexander (Alexander the Great)").
+  const marksTitle = told.some((w) => NUMBER.has(w) || /\d/.test(w) || caps.has(w));
   const next = wordsAfter(noted, named)?.[0] ?? "";
-  const fuller = named.every((w) => noteWords.some((x) => sameWord(w, x))) && !addsNumber && after(noted, named) !== "sep" && next !== "and" && !LINKS.has(next) && !titleShaped && !namesTitle;
+  const fuller = named.every((w) => noteWords.some((x) => sameWord(w, x))) && !marksTitle && after(noted, named) !== "sep" && next !== "and" && next !== "of" && !LINKS.has(next) && !titleShaped && !namesTitle;
   // A title must hold the note's words that aren't kind words ("Batman (movie)" is not Batman: The Movie).
   // Part words only mark the number ("Toy Story (Part 3)" is Toy Story 3).
   const titleWords = told.filter((w) => !KIND.has(w) && !PART.has(w));
-  const holdsExactly = (e: Entity, ws: string[]) => !!ws.length && ws.every((w) => words(e.name).some((x) => sameWord(w, x)));
+  // A word written in capitals may be in a title as the initials of words in a row ("Law & Order (SVU)" is Law & Order:
+  // Special Victims Unit, "NCIS (LA)" NCIS: Los Angeles).
+  const inName = (w: string, e: Entity) => words(e.name).some((x) => sameWord(w, x)) || (caps.has(w) && words(e.name).map((x) => x[0]).join("").includes(w));
+  const holdsExactly = (e: Entity, ws: string[]) => !!ws.length && ws.every((w) => inName(w, e));
   // Linking words don't count in a title ("War for the Planet of the Apes").
   // Next to an entry named exactly the name, a title must continue the name after a separator, a linking word or a
   // number ("Star Wars: Episode V", "Harry Potter and the Prisoner of Azkaban", "The Godfather Part II"), or start
   // with the note that way and hold the name ("Furiosa: A Mad Max Saga", "Rise of the Planet of the Apes"); a title
   // running the name straight on is another name ("Amy Winehouse" for "Amy (Winehouse documentary)").
   // A note repeating the name before a separator reads from after it ("Twilight (Twilight: New Moon)" is New Moon).
-  // A title named exactly a note shaped like a title, naming a title, or adding a number is taken too ("Spider-Man
-  // (The Amazing Spider-Man 2)", "Godzilla (Godzilla Minus One)").
+  // A title named exactly a note shaped like a title, naming a title, or adding a number or a word in capitals is
+  // taken too ("Spider-Man (The Amazing Spider-Man 2)", "Godzilla (Godzilla Minus One)", "Love Island (Love Island USA)").
   const noteLead = (after(noted, named) === "sep" ? wordsAfter(noted, named) ?? noteWords : noteWords).filter((w) => !LINKS.has(w));
   const subtitle = (e: Entity) => ["sep", "link", "number"].includes(after(e.name, named) ?? "");
-  const spinOff = (e: Entity) => ["sep", "link"].includes(after(e.name, noteLead) ?? "") || ((titleShaped || namesTitle || addsNumber) && nameKey(e.name) === nameKey(noted));
-  // Or the name, then a franchise's own words, then a separator, then the note ("The Twilight Saga: New Moon").
+  const spinOff = (e: Entity) => ["sep", "link"].includes(after(e.name, noteLead) ?? "") || ((titleShaped || namesTitle || marksTitle) && nameKey(e.name) === nameKey(noted));
+  // Or the name, then a franchise's own words, then a separator, then the note ("The Twilight Saga: New Moon"; not
+  // "The Paley Center Salutes Law & Order: SVU").
   const franchise = (e: Entity) => {
     const cut = e.name.search(SEPARATOR);
-    return cut > 0 && holdsExactly({ ...e, name: e.name.slice(0, cut) }, named) && after(e.name.slice(cut).replace(/^\s*[:\u2013\u2014-]\s*/, ""), noteLead) !== null;
+    return cut > 0 && after(e.name.slice(0, cut), named) !== null && after(e.name.slice(cut).replace(/^\s*[:\u2013\u2014-]\s*/, ""), noteLead) !== null;
   };
   const startsWithName = (e: Entity) => after(e.name, named) !== null;
   // A note that is only a number ("The Hunger Games (2)", "Frozen (Part 2)") asks for the Nth film: the title
