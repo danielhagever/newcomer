@@ -86,7 +86,7 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 216 such inputs are recorded in test/note-fixtures.json):
+// live answers for 218 such inputs are recorded in test/note-fixtures.json):
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
@@ -233,7 +233,9 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   // must continue the name or start with the note (below).
   // A name one letter off (two in a long name) counts as named too ("Better Call Saull (Breaking Bad)" is still
   // Better Call Saul).
-  const named_ = !!r && (r.match !== "closest" || typoDistance(squashed(r.pick.name), squashed(bare)) <= (squashed(bare).length > 10 ? 2 : 1));
+  // So does the same name with a number written otherwise ("Fantastic 4" is Fantastic Four).
+  const sameName = (a: string, b: string) => { const x = words(a), y = words(b); return x.length === y.length && x.every((w, i) => sameWord(w, y[i])); };
+  const named_ = !!r && (r.match !== "closest" || sameName(r.pick.name, bare) || typoDistance(squashed(r.pick.name), squashed(bare)) <= (squashed(bare).length > 10 ? 2 : 1));
   const noteWords = words(noted).filter((w) => !SMALL.has(w));
   // A note holding the whole name and adding words is a fuller name ("Whitney (Whitney Houston)", "Amy (Amy
   // Winehouse)"), not a subtitle; adding a number, it's a sequel ("Toy Story (Toy Story 3)", "The Hunger
@@ -289,14 +291,14 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
     // The name's own words aren't numbers here (the X of "X-Men", the Four of "Fantastic Four").
     const hasNumber = (e: Entity) => words(e.name).some((w) => NUMBER.has(w) && !named.includes(w));
     // Qloo's first answer, or its second when the first is the film named exactly the name ("Knives Out (2)": Knives
-    // Out, then Glass Onion). A second answer is weaker evidence: it must start with the name or not hold it at all
-    // (a sequel named otherwise), not merely hold it ("The Making of The Matrix").
+    // Out, then Glass Onion). A second answer is weaker evidence: only a sequel named otherwise, not holding the name
+    // ("The Making of The Matrix", "The Matrix Resurrections" are left to the count by year).
     const second = !!anchor && found[0] === anchor;
     const top = second ? found[1] : found[0];
     // Its number, if any, is the one asked for and it holds a word of the name ("Fast & Furious (7)" is Furious 7, "(5)"
     // Fast Five; an unrelated "Inside Out 2" is not taken).
     const numberAsked = (e: Entity) => !hasNumber(e) || (ownsNumber(e) && named.some((w) => words(e.name).some((x) => sameWord(w, x))));
-    const trusted = n > 1 && !!top && !isArtist(top) && top !== anchor && numberAsked(top) && (anchor ? yearOf(top) > yearOf(anchor) : holdsName(top)) && (!second || startsWithName(top) || !holdsName(top));
+    const trusted = n > 1 && !!top && !isArtist(top) && numberAsked(top) && (anchor ? yearOf(top) > yearOf(anchor) : holdsName(top)) && (!second || !holdsName(top));
     const since = anchor ? yearOf(anchor) : NaN;
     const later = found
       .filter((e) => e !== anchor && !isArtist(e) && startsWithName(e) && !ownNumber(e) && !Number.isNaN(yearOf(e)) && (Number.isNaN(since) || yearOf(e) > since))

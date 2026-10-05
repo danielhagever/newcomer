@@ -71,6 +71,7 @@ const NOTES: [string, any[], string][] = [
   ["Toy Story (1)", [film("Toy Story That Time Forgot", "2014"), film("Toy Story", "1995")], "Toy Story (1995) closest"], // Qloo's top answer is never the first
   ["The Matrix (2)", [film("Dark City", "1998"), film("The Matrix", "1999"), film("The Matrix Reloaded", "2003")], "The Matrix Reloaded (2003) closest"], // nor older than the film named exactly that
   ["Twilight (2)", [film("Inside Out 2", "2024"), film("Twilight", "2008"), film("The Twilight Saga: New Moon", "2009")], "The Twilight Saga: New Moon (2009) closest"], // Qloo's top answer carries the 2 but no word of the name
+  ["The Matrix (2)", [film("The Matrix", "1999"), film("The Matrix Resurrections", "2021"), film("The Matrix Reloaded", "2003")], "The Matrix Reloaded (2003) closest"], // Qloo's second answer only as a sequel named otherwise
   // A one-word note is never the name of another title: "Phoenix" is the actor here, though a 2014 film is named that.
   ["Joker (Phoenix)", [film("Joker", "2019"), film("Phoenix", "2014")], "Joker (2019) closest"],
   // Nothing before the note, or nothing like it: no guess.
@@ -90,7 +91,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 216 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
+test("notes in brackets on Qloo's live answers: 218 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -112,7 +113,7 @@ test("notes in brackets on Qloo's live answers: 216 realistic inputs get the ent
   }
   // Every miss is a known limit, and every known limit still misses (so a fix there is noticed).
   assert.deepEqual(wrong, known);
-  assert.ok(searches <= 279, `${searches} Qloo searches for 216 names`);
+  assert.ok(searches <= 281, `${searches} Qloo searches for 218 names`);
 });
 
 test("when the exact name wins, the title named in the note is offered first under Not it? (Qloo's live answers)", () => {

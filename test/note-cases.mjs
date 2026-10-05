@@ -231,6 +231,9 @@ export const T = [
   ["X-Men (2)", "movie", (l) => /^x2\b/i.test(l)],
   ["Fantastic Four (2)", "movie", title("Fantastic Four: Rise of the Silver Surfer")],
   ["Knives Out (2)", "movie", (l) => /^glass onion/i.test(l)],
+  // pass 19 (written before recording): the name's number typed as a digit
+  ["Fantastic 4 (2)", "movie", title("Fantastic Four: Rise of the Silver Surfer")],
+  ["Fantastic 4 (II)", "movie", title("Fantastic Four: Rise of the Silver Surfer")],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],
