@@ -443,7 +443,7 @@ export async function matchNeighborhoods(
         ? "Areas are squares of about 1 km (2.4 km where Qloo's cells are coarser) ranked by the mean Qloo percentile of all their map cells, so one hot block can't outrank a whole hot area, plus 0.03 for each of your kinds of places within reach, up to three (Newcomer's rules)."
         : "With only food and activity tastes, neighborhoods are ranked by how many matching places Qloo found there (Newcomer's rule).",
       "Each weekend stop is the best-ranked place for that part of the day by Qloo's time-of-day tags; tattoo shops, salons and hotels are skipped unless they serve food or drink (Newcomer's rules).",
-      "Schools, offices, places of worship, transit stations and airports, recording studios and similar places are left out of the lists, since a newcomer can't visit them (Newcomer's rule).",
+      "Schools, offices, places of worship, transit stations and airports, military bases, recording studios and similar places are left out of the lists, since a newcomer can't visit them (Newcomer's rule).",
       ...(unsure.length ? ["Where a name wasn't one exact match, the first Qloo candidate that resembles it was used; you can pick another."] : []),
     ],
     degraded,
@@ -577,7 +577,7 @@ function dedupeEvidence(hoods: Neighborhood[]): number {
 }
 
 // Judged on Qloo's categories only: a venue's name ("The Garage", "Temple Bar") says nothing.
-const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|municipal|department of|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office|business center|senior citizen|(subway|train|railway|metro|bus|transit) station|ferry terminal|airport)\b/i;
+const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|municipal|department of|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office|business center|senior citizen|(subway|train|railway|metro|bus|transit) station|ferry terminal|airport|military)\b/i;
 const visitable = (e: Entity) => !NOT_VISITABLE.test((e.tags ?? []).join(" | "));
 
 async function inBatches<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {

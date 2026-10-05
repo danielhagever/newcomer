@@ -670,6 +670,7 @@ test("can't-visit places are judged by Qloo's categories, not names, and filtere
     place("s3", "St. Somebody", "Downtown", 30.27, -97.74, ["Church"], ["Morning"]),
     place("s4", "DUMBO", "Downtown", 30.27, -97.74, ["Ferry terminal"], ["Morning"]), // live: a Sunday stop in Little Italy
     place("s5", "Chicago O'Hare International Airport", "Downtown", 30.27, -97.74, ["International airport"], ["Morning"]),
+    place("s6", "Joint Base Myer Henderson Hall Garrison Headquarters", "Downtown", 30.27, -97.74, ["Military base"], ["Morning"]), // live: an Arlington Saturday stop
     place("v1", "The Garage", "Downtown", 30.27, -97.74, ["Cocktail bar"], ["Evening"]),
     place("v2", "Temple Bar", "Downtown", 30.27, -97.74, ["Pub"], ["Evening"]),
     place("v3", "Bank & Bourbon", "Downtown", 30.27, -97.74, ["Restaurant"], ["Evening"]),
@@ -682,7 +683,7 @@ test("can't-visit places are judged by Qloo's categories, not names, and filtere
     const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
     const listed = r.neighborhoods.flatMap((h) => h.evidence.map((e) => e.name));
     assert.deepEqual(listed.sort(), ["Bank & Bourbon", "Cafe One", "Gallery Two", "Temple Bar", "The Garage"]);
-    assert.ok(r.trace.some((t) => t.step === "Filter" && /Left out 5 places/.test(t.detail)));
+    assert.ok(r.trace.some((t) => t.step === "Filter" && /Left out 6 places/.test(t.detail)));
   } finally {
     m.restore();
   }
