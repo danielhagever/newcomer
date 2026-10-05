@@ -95,7 +95,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 261 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
+test("notes in brackets on Qloo's live answers: 268 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -117,7 +117,7 @@ test("notes in brackets on Qloo's live answers: 261 realistic inputs get the ent
   }
   // Every miss is a known limit, and every known limit still misses (so a fix there is noticed).
   assert.deepEqual(wrong, known);
-  assert.ok(searches <= 331, `${searches} Qloo searches for 261 names`);
+  assert.ok(searches <= 341, `${searches} Qloo searches for 268 names`);
 });
 
 test("when the exact name wins, the title named in the note is offered first under Not it? (Qloo's live answers)", () => {

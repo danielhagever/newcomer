@@ -285,6 +285,15 @@ export const T = [
   ["Twilight (The Twilight Saga: New Moon)", "movie", title("The Twilight Saga: New Moon")],
   ["Mad Max (Furiosa: A Mad Max Saga)", "movie", title("Furiosa: A Mad Max Saga")],
   ["Planet of the Apes (Rise of the Planet of the Apes)", "movie", title("Rise of the Planet of the Apes")],
+  // pass 26 (written before recording): a name ending in "!", a full title without its colon, ordinal notes with "part",
+  // a note naming a crossover ("X vs. Name")
+  ["Mamma Mia (Mamma Mia! Here We Go Again)", "movie", title("Mamma Mia! Here We Go Again")],
+  ["Shazam (Shazam! Fury of the Gods)", "movie", title("Shazam! Fury of the Gods")],
+  ["Jurassic Park (The Lost World Jurassic Park)", "movie", title("The Lost World: Jurassic Park")],
+  ["Kill Bill (second part)", "movie", (l) => /^kill bill:? vol(\.|ume) 2( \(|$)/i.test(l)],
+  ["The Matrix (second installment)", "movie", title("The Matrix Reloaded")],
+  ["Predator (Alien vs. Predator)", "movie", title("Alien vs. Predator")], // Qloo's name for AVP (my expected title was the official one)
+  ["Kong (Godzilla vs. Kong)", "movie", title("Godzilla vs. Kong")],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],

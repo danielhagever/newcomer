@@ -86,7 +86,7 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 261 such inputs are recorded in test/note-fixtures.json):
+// live answers for 268 such inputs are recorded in test/note-fixtures.json):
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
@@ -108,8 +108,9 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 //   note holding the whole name plus words is a fuller name, not a subtitle ("Amy (Amy Winehouse)" is Amy, 2015),
 //   unless it adds a number ("Toy Story (Toy Story 3)", "(The Hunger Games: Mockingjay Part 1)") or continues the
 //   name after a separator ("Mad Max (Mad Max: Fury Road)"; such a note is read from after the name: "Twilight
-//   (Twilight: New Moon)" is New Moon), nor is a note shaped like a title ("Jurassic Park (The Lost World: Jurassic
-//   Park)", "Planet of the Apes (Rise of the Planet of the Apes)"). A title that is a later part of the note's own title gives way to the entry
+//   (Twilight: New Moon)" is New Moon; a name ending in "!" counts as followed by one: "Mamma Mia (Mamma Mia! Here We Go
+//   Again)"), nor is a note shaped like a title ("Planet of the Apes (Rise of the Planet of the Apes)") or naming
+//   exactly a found title with a separator ("Jurassic Park (The Lost World Jurassic Park)"). A title that is a later part of the note's own title gives way to the entry
 //   named exactly the note ("Rambo (First Blood)" is First Blood, not Rambo: First Blood Part II). Linking words
 //   ("to", "in", "presents") and part words ("Part", "Vol.") are skipped: "Back to the Future (Part 2)" is Back to
 //   the Future Part II, "Toy Story (Part 3)" Toy Story 3, "Fast & Furious (Hobbs & Shaw)" Fast & Furious Presents:
@@ -191,6 +192,8 @@ function after(title: string, given: string[]): "sep" | "link" | "number" | "wor
       if (SMALL.has(w) || LINKS.has(w)) continue;
       if (!sameWord(ws[k], w)) return null;
       k++;
+      // A name ending in "!" or "?" is followed as by a separator ("Mamma Mia! Here We Go Again").
+      if (k === ws.length && /[!?]$/.test(tokens[i]) && i < tokens.length - 1) return "sep";
     }
   }
   return k === ws.length ? "end" : null;
@@ -220,7 +223,7 @@ const yearOf = (e: Entity) => Number(years(e.disambiguation)[0] ?? NaN);
 const ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"];
 // An ordinal note is its number ("Shrek (2nd film)", "The Matrix (the second one)" ask for the second).
 function ordinalOf(note: string): number | null {
-  const m = /^(?:the\s+)?(?:(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)|(\d+)(?:st|nd|rd|th))(?:\s+one)?$/i.exec(trimKind(note));
+  const m = /^(?:the\s+)?(?:(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)|(\d+)(?:st|nd|rd|th))(?:\s+(?:one|part|installment))?$/i.exec(trimKind(note));
   return m ? Number(m[2] ?? ORDINALS.indexOf(m[1].toLowerCase()) + 1) : null;
 }
 const years = (s: string | undefined): string[] => s?.match(/\b\d{4}\b/g) ?? [];
@@ -264,13 +267,13 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   // Winehouse)"), not a subtitle; adding a number, it's a sequel ("Toy Story (Toy Story 3)", "The Hunger
   // Games (The Hunger Games: Mockingjay Part 1)").
   // Nor when the note continues the name after a separator, as a title does ("Mad Max (Mad Max: Fury Road)").
-  // A note shaped like a title (a separator in it, or the name right after a small or linking word: "Jurassic Park (The
-  // Lost World: Jurassic Park)", "Planet of the Apes (Rise of the Planet of the Apes)") is never a fuller name, nor one
-  // naming exactly a found title that continues the name after a separator ("Star Trek (Star Trek The Next Generation)").
+  // A note shaped like a title (the name right after a small or linking word: "Planet of the Apes (Rise of the Planet of
+  // the Apes)", "Predator (Alien vs. Predator)") is never a fuller name, nor one naming exactly a found title with a
+  // separator in it ("Jurassic Park (The Lost World Jurassic Park)", "Star Trek (Star Trek The Next Generation)").
   const nw = allWords(noted);
   const at = named.length ? nw.findIndex((w) => sameWord(w, named[0])) : -1;
-  const titleShaped = /[:\u2013\u2014]|\s-\s/.test(noted) || (at > 0 && (SMALL.has(nw[at - 1]) || LINKS.has(nw[at - 1])));
-  const namesTitle = found.some((e) => !isArtist(e) && nameKey(e.name) === nameKey(noted) && after(e.name, named) === "sep");
+  const titleShaped = (at > 0 && (SMALL.has(nw[at - 1]) || LINKS.has(nw[at - 1])));
+  const namesTitle = found.some((e) => !isArtist(e) && nameKey(e.name) === nameKey(noted) && (after(e.name, named) === "sep" || /[:\u2013\u2014]|\s-\s/.test(e.name)));
   const fuller = named.every((w) => noteWords.some((x) => sameWord(w, x))) && !told.some((w) => NUMBER.has(w)) && after(noted, named) !== "sep" && !titleShaped && !namesTitle;
   // A title must hold the note's words that aren't kind words ("Batman (movie)" is not Batman: The Movie).
   // Part words only mark the number ("Toy Story (Part 3)" is Toy Story 3).
@@ -284,7 +287,7 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   // A note repeating the name before a separator reads from after it ("Twilight (Twilight: New Moon)" is New Moon).
   const noteLead = (after(noted, named) === "sep" ? wordsAfter(noted, named) ?? noteWords : noteWords).filter((w) => !LINKS.has(w));
   const subtitle = (e: Entity) => ["sep", "link", "number"].includes(after(e.name, named) ?? "");
-  const spinOff = (e: Entity) => ["sep", "link"].includes(after(e.name, noteLead) ?? "") || (titleShaped && nameKey(e.name) === nameKey(noted));
+  const spinOff = (e: Entity) => ["sep", "link"].includes(after(e.name, noteLead) ?? "") || ((titleShaped || namesTitle) && nameKey(e.name) === nameKey(noted));
   // Or the name, then a franchise's own words, then a separator, then the note ("The Twilight Saga: New Moon").
   const franchise = (e: Entity) => {
     const cut = e.name.search(/\s*[:\u2013\u2014]\s*|\s+-\s+/);
