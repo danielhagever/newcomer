@@ -374,6 +374,11 @@ export const T = [
   ["The Hobbit (J. R. R. Tolkien)", "book", (l) => l.startsWith("The Hobbit") && l.includes("J.R.R. Tolkien")],
   ["The Hobbit (by Tolkien)", "book", (l) => l.startsWith("The Hobbit") && l.includes("Tolkien")],
   ["Cross Fire (Alex Cross, #17)", "book", (l) => l.startsWith("Cross Fire") && l.includes("Patterson")], // Qloo writes "James  Patterson"
+  // A series named by its author is its first book (pass 32, recorded 2026-10-05).
+  ["Harry Potter (J.K. Rowling)", "book", (l) => /^Harry Potter and the (Sorcerer|Philosopher)['’]s Stone/.test(l)], // Qloo writes a curly apostrophe
+  ["Percy Jackson (Rick Riordan)", "book", (l) => l.startsWith("The Lightning Thief")],
+  ["The Hunger Games (Suzanne Collins)", "book", (l) => l.startsWith("The Hunger Games (The Hunger Games, #1)")],
+  ["Twilight (Stephenie Meyer)", "book", (l) => l.startsWith("Twilight (") && l.includes("#1)")],
   ["Vacation (National Lampoon's Vacation)", "movie", title("National Lampoon's Vacation")],
   ["Dracula (Bram Stoker's Dracula)", "movie", at("dracula", "1992")], // corrected after recording: Qloo names Bram Stoker's Dracula plain "Dracula" (1992)
   ["Vacation (National Lampoon\u2019s Vacation)", "movie", title("National Lampoon's Vacation")], // a curly apostrophe, as phones type it

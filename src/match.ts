@@ -304,11 +304,14 @@ export async function matchNeighborhoods(
     // same city Newcomer located, and the locality it used is checked against it.
     heat = await q.heatmap(mapSignals, { query: center.query });
     const offBy = heat.locality ? km(heat.locality, center) : heat.points.length ? medianKm(heat.points, center) : 0;
-    if (!heat.points.length || offBy > 50) {
-      trace.push({
-        step: "Check",
-        detail: `Qloo's area for "${center.query}" ${heat.points.length ? `was ${Math.round(offBy)} km from the located city` : "was empty"}; asked again for 25 km around the city centre`,
-      });
+    // Qloo can answer with a part of the city: for "Tokyo, Japan" its locality is Minato ("Minato, Tokyo, ...", one
+    // ward, 6 km across; measured on 35 cities, the only one besides Sao Paulo, whose region names the city too).
+    const [own, ...within] = (heat.locality?.name ?? "").split(",").map((x) => nameKey(x));
+    const cityKey = nameKey(center.name.split(",")[0]);
+    const partOf = own !== cityKey && within.includes(cityKey);
+    if (!heat.points.length || offBy > 50 || partOf) {
+      const why = !heat.points.length ? "was empty" : partOf ? `was only ${heat.locality!.name.split(",")[0]}, a part of it` : `was ${Math.round(offBy)} km from the located city`;
+      trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" ${why}; asked again for 25 km around the city centre` });
       heat = await q.heatmap(mapSignals, { lat: center.lat, lon: center.lon, radiusM: 25000 });
       if (heat.points.length && medianKm(heat.points, center) > 50)
         throw new AppError(`Qloo's map didn't line up with ${center.name}, so no neighborhoods are shown. Try the city with its state or country.`, 502);
@@ -378,18 +381,27 @@ export async function matchNeighborhoods(
   // the city itself ("Brooklyn" in Brooklyn) or a ward number ("Ward 2", Qloo's name for the National Mall) says
   // nothing; skip it.
   const cityWords = new Set([center.name.split(",")[0], qlooCity?.split(",")[0] ?? ""].map(nameKey).filter(Boolean));
-  const says = (n: string | undefined): n is string => !!n && !cityWords.has(nameKey(n)) && !/^ward \d+$/i.test(n.trim());
+  // Nor an electoral district ("University\u2014Rosedale", Qloo's names in Toronto, join two places with a dash).
+  const says = (n: string | undefined): n is string => !!n && !cityWords.has(nameKey(n)) && !/^ward \d+$/i.test(n.trim()) && !/\S\u2014\S/.test(n);
   const step = areaStep(cellLength(heat.points));
   const inSquare = (h: Neighborhood, e: Entity) => !step || (e.lat !== undefined && e.lon !== undefined && Math.floor(e.lat / step) === Math.floor(h.lat / step) && Math.floor(e.lon / step) === Math.floor(h.lon / step));
-  const byPlaces = (ps: Entity[]) => mostCommon(ps.filter(visitable).map((e) => e.neighborhood).filter(says)) ?? "";
+  // A Japanese block number after a name is an address, not a neighborhood ("Ginza 8-chome" and "Ginza 2-chome" are
+  // Ginza, "Roppongi 7" Roppongi: Tokyo's names, live), so such areas merge. Elsewhere a number can be the name ("Zona
+  // 10" in Guatemala City), so only the "-chome" form is dropped.
+  const japan = /\bJapan\b/i.test(center.name);
+  const clean = (n: string) => n.replace(japan ? /\s+\d+(?:-chome)?$/i : /\s+\d+-chome$/i, "");
+  const byPlaces = (ps: Entity[]) => clean(mostCommon(ps.filter(visitable).map((e) => e.neighborhood).filter(says)) ?? "");
   for (const h of hoods) if (!h.name) h.name = byPlaces([...h.evidence, ...h.matches].filter((e) => inSquare(h, e)));
-  for (const h of hoods) if (!says(h.name)) h.name = "";
+  for (const h of hoods) h.name = says(h.name) ? clean(h.name) : "";
   const unnamed = hoods.filter((h) => !h.name);
   if (unnamed.length) {
     const r = await namesFor(env.CACHE, budget, center.name, unnamed, 3);
     for (const h of unnamed) {
-      h.name = (r.names.get(cellKey(h.lat, h.lon)) ?? []).find(says) ?? byPlaces([...h.evidence, ...h.matches]);
+      const osm = (r.names.get(cellKey(h.lat, h.lon)) ?? []).find(says);
+      h.name = osm ? clean(osm) : byPlaces([...h.evidence, ...h.matches]);
     }
+    // A lookup Photon didn't answer may name the area next time: the answer isn't cached.
+    if (r.failed) degraded = true;
     const missing = unnamed.filter((h) => !h.name).length;
     if (missing) trace.push({ step: "Name", detail: `${missing} area${missing === 1 ? "" : "s"} had no neighborhood name in Qloo or OpenStreetMap and ${missing === 1 ? "was" : "were"} left out` });
   }
@@ -577,7 +589,7 @@ function dedupeEvidence(hoods: Neighborhood[]): number {
 }
 
 // Judged on Qloo's categories only: a venue's name ("The Garage", "Temple Bar") says nothing.
-const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|municipal|department of|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office|business center|senior citizen|(subway|train|railway|metro|bus|transit) station|ferry terminal|airport|military)\b/i;
+const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|municipal|department of|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office|business center|senior citizen|(subway|train|railway|metro|bus|transit) station|ferry terminal|airport|military|academic department|research institute|radio broadcaster|movie studio)\b/i;
 const visitable = (e: Entity) => !NOT_VISITABLE.test((e.tags ?? []).join(" | "));
 
 async function inBatches<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {

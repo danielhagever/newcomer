@@ -59,11 +59,11 @@ export class QlooError extends AppError {}
 // searches ran, over 12 s once and 20.9 s once (four books, a podcast and two games; the same call again also took
 // over 20 s, so waiting helps more than asking again).
 const TIMEOUT_MS = 12000;
-export const HEATMAP_TIMEOUT_MS = 40000;
-// All of a search's Qloo calls share 45 s: each waits at most what is left, so a slow heatmap, the 25 km one
-// after it and a retry can't keep an agent waiting past a client's usual 60 s limit (OpenStreetMap's area names,
-// asked six at a time after the Qloo calls, take 5 s a round, rarely two).
-const TOTAL_MS = 45000;
+// All of a search's Qloo calls share 40 s: each waits at most what is left (the heatmap all of it), so a slow
+// heatmap, the 25 km one after it and a retry can't keep an agent waiting past a client's usual 60 s limit.
+// OpenStreetMap's area names come after, three at a time, 5 s a round at most (three rounds for eight areas); a
+// live search takes 10 to 17 s in all.
+const TOTAL_MS = 40000;
 
 // Qloo answers 429 to the sixth call within about a second (measured 2026-10-03 after a quiet minute:
 // 5 at once all 200, 6 at once lose one, 8 lose three; a steady 4 a second loses the sixth call every
@@ -177,7 +177,7 @@ export class Qloo {
   // and `page` are ignored for heatmaps (and take > 50 is a 400), and `affinity` is the cell's
   // percentile within the city (1 = best cell). The answer also names the locality Qloo used.
   async heatmap(signals: Signals, where: Where): Promise<{ points: HeatPoint[]; locality?: Locality }> {
-    const body = await this.get("/v2/insights", { "filter.type": "urn:heatmap", ...whereParams(where), ...signalParams(signals) }, true, HEATMAP_TIMEOUT_MS);
+    const body = await this.get("/v2/insights", { "filter.type": "urn:heatmap", ...whereParams(where), ...signalParams(signals) }, true, Infinity);
     const list: any[] = body?.results?.heatmap ?? [];
     const points = list
       .map((p) => {

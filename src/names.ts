@@ -86,7 +86,7 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 345 such inputs are recorded in test/note-fixtures.json):
+// live answers for 349 such inputs are recorded in test/note-fixtures.json):
 // - first, the entry named the name (not an act) whose disambiguation holds every word of the note, after "by" if
 //   there is one: a book's author ("Emma (Jane Austen)" is Emma, 1815, not a collection holding Emma; "Beloved (by
 //   Toni Morrison)" is Qloo's "Beloved (Beloved Trilogy, #1)", 1987; a misspelling or a possessive still counts, a
@@ -444,9 +444,15 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   const credit = told.includes("by") ? told.slice(told.indexOf("by") + 1) : told;
   // Qloo's own series note counts too ("Thief of Time (Discworld, #26)" is "Thief of Time (Discworld, #26; Death, #5)").
   // Else a title starting with the name ("The Hobbit (J.R.R. Tolkien)" is "The Hobbit, or There and Back Again", not
-  // a graphic novel named exactly The Hobbit), with the name searched alone too, where the exact one may be.
+  // a graphic novel named exactly The Hobbit), or whose series does ("Percy Jackson (Rick Riordan)" is The Lightning
+  // Thief, Percy Jackson and the Olympians, #1): the earliest one ("Harry Potter (J.K. Rowling)" is the Sorcerer's Stone,
+  // 1997, not Qloo's first answer, #3), with the name searched alone too, where the exact one may be.
   const namedCredit = credit.length ? found.find((e) => !isArtist(e) && nameKey(unseries(e.name)) === nameKey(bare) && credits(credit, `${e.disambiguation ?? ""} ${SERIES.exec(e.name)?.[0] ?? ""}`)) : undefined;
-  const credited = namedCredit ?? (credit.length ? found.find((e) => !isArtist(e) && wordsAfter(unseries(e.name), named) !== null && credits(credit, e.disambiguation ?? "")) : undefined);
+  const seriesOf = (e: Entity) => SERIES.exec(e.name)?.[0].replace(/^\s*\(|\)\s*$/g, "") ?? "";
+  const yr = (e: Entity) => { const y = yearOf(e); return Number.isNaN(y) ? Infinity : y; };
+  const creditedTitles = credit.length ? found.map((e, i) => ({ e, i })).filter(({ e }) => !isArtist(e) && (wordsAfter(unseries(e.name), named) !== null || wordsAfter(seriesOf(e).replace(/,?\s*#\d+$/, ""), named) !== null) && credits(credit, e.disambiguation ?? "")) : [];
+  creditedTitles.sort((a, b) => yr(a.e) - yr(b.e) || a.i - b.i);
+  const credited = namedCredit ?? creditedTitles[0]?.e;
   if (credited) {
     const byName = rankTyped(found, bare);
     return { pick: credited, match: "closest", list: [credited, ...(byName?.list ?? []).filter((e) => e !== credited)], offered: (e) => !!byName?.offered(e) && holdsName(e), note: "credit", searchName: !namedCredit };

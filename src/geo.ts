@@ -260,41 +260,50 @@ async function byId(budget: Budget, id: number): Promise<any[]> {
   }
 }
 
-const cellKey = (lat: number, lon: number) => `${lat.toFixed(2)},${lon.toFixed(2)}`; // about 1 km
+// About 100 m: OpenStreetMap is asked at the area itself. (At 0.01 degrees it was asked at a corner of the area's
+// square, since squares are aligned to 0.01 degrees: Toronto's Kensington Market came back as a housing co-op.)
+const cellKey = (lat: number, lon: number) => `${lat.toFixed(3)},${lon.toFixed(3)}`;
 
 // The names OpenStreetMap gives a spot, the neighborhood level first: its district, then the finer locality (in New
 // York the district is the borough, "Brooklyn" for Dumbo; in Washington a ward, "Ward 1" for Adams Morgan, measured),
-// then the suburb; a street is labelled as such rather than passed off as a neighborhood.
-async function reverseName(lat: number, lon: number): Promise<string[]> {
+// then the suburb; a street is labelled as such rather than passed off as a neighborhood (when the spot is itself a
+// street, its name is the street's). null when Photon didn't answer (it loses some of several lookups at once).
+async function reverseName(lat: number, lon: number): Promise<string[] | null> {
   try {
     const res = await fetchWithTimeout(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&lang=en`, { headers: UA }, 5000);
+    if (!res.ok) return null;
     const d: any = await res.json();
     const p = d.features?.[0]?.properties ?? {};
-    return [p.district, p.locality, p.suburb, p.street ? `around ${p.street}` : undefined].filter((n): n is string => typeof n === "string" && !!n.trim());
+    const street = p.street ?? (p.osm_key === "highway" ? p.name : undefined);
+    return [p.district, p.locality, p.suburb, street ? `around ${street}` : undefined].filter((n): n is string => typeof n === "string" && !!n.trim());
   } catch {
-    return [];
+    return null;
   }
 }
 
-// Names for many map cells with one KV read and one KV write per city. Lookups run a few at a time
-// and stop when the request's budget runs low (keep `reserve` units for the steps after naming).
+// Names for many map cells with one KV read and one KV write per city. Lookups run three at a time (Photon lost 2 to 4
+// of 6 at once, measured) and stop when the request's budget runs low (keep `reserve` units for the steps after
+// naming). A lookup Photon didn't answer is counted as failed, not as a spot without a name, and isn't kept.
 export async function namesFor(
   cache: KVNamespace,
   budget: Budget,
   cityKey: string,
   cells: { lat: number; lon: number }[],
   reserve: number,
-): Promise<{ names: Map<string, string[]>; missing: number }> {
+): Promise<{ names: Map<string, string[]>; missing: number; failed: number }> {
   const key = `names2:${cityKey.toLowerCase()}`; // names2: each cell keeps every name OpenStreetMap gives it
   const known: Record<string, string[]> = (await kvGet(cache, budget, key)) ?? {};
   const want = [...new Set(cells.map((c) => cellKey(c.lat, c.lon)))].filter((k) => !(k in known));
   const fresh: Record<string, string[]> = {};
-  for (let i = 0; i < want.length; i += 6) {
-    const batch = want.slice(i, i + 6).filter(() => budget.left() > reserve + 1 && budget.take());
+  let failed = 0;
+  for (let i = 0; i < want.length; i += 3) {
+    const batch = want.slice(i, i + 3).filter(() => budget.left() > reserve + 1 && budget.take());
     if (!batch.length) break;
     const got = await Promise.all(batch.map((k) => reverseName(+k.split(",")[0], +k.split(",")[1])));
     batch.forEach((k, j) => {
-      if (got[j].length) fresh[k] = got[j];
+      const g = got[j];
+      if (g === null) failed++;
+      else if (g.length) fresh[k] = g;
     });
   }
   if (Object.keys(fresh).length) await kvPut(cache, budget, key, { ...known, ...fresh }, 60 * 60 * 24 * 30);
@@ -306,7 +315,7 @@ export async function namesFor(
     if (n) names.set(cellKey(c.lat, c.lon), n);
     else missing++;
   }
-  return { names, missing };
+  return { names, missing, failed };
 }
 
 export { cellKey };
