@@ -267,7 +267,8 @@ const cellKey = (lat: number, lon: number) => `${lat.toFixed(3)},${lon.toFixed(3
 // The names OpenStreetMap gives a spot, the neighborhood level first: its district, then the finer locality (in New
 // York the district is the borough, "Brooklyn" for Dumbo; in Washington a ward, "Ward 1" for Adams Morgan, measured),
 // then the suburb; a street is labelled as such rather than passed off as a neighborhood (when the spot is itself a
-// street, its name is the street's). null when Photon didn't answer (it loses some of several lookups at once).
+// street, its name is the street's; when it is itself a neighbourhood or a quarter, that name comes before the suburb:
+// Missoula's "Lower Rattlesnake", live). null when Photon didn't answer (it loses some of several lookups at once).
 async function reverseName(lat: number, lon: number): Promise<string[] | null> {
   try {
     const res = await fetchWithTimeout(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&lang=en`, { headers: UA }, 5000);
@@ -275,7 +276,8 @@ async function reverseName(lat: number, lon: number): Promise<string[] | null> {
     const d: any = await res.json();
     const p = d.features?.[0]?.properties ?? {};
     const street = p.street ?? (p.osm_key === "highway" ? p.name : undefined);
-    return [p.district, p.locality, p.suburb, street ? `around ${street}` : undefined].filter((n): n is string => typeof n === "string" && !!n.trim());
+    const spot = p.osm_key === "place" ? p.name : undefined;
+    return [p.district, p.locality, spot, p.suburb, street ? `around ${street}` : undefined].filter((n): n is string => typeof n === "string" && !!n.trim());
   } catch {
     return null;
   }

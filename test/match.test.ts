@@ -275,11 +275,13 @@ test("areas are named by Qloo's own neighborhood field; OpenStreetMap is not cal
 test("an area is named by the places inside its own square, else OpenStreetMap, else the places around it; never the city or a ward", async () => {
   // Live in Arlington: Rosslyn's square found Georgetown's places across the river, and Qloo has no neighborhood for
   // Rosslyn's own; Qloo files the National Mall under "Ward 2"; OpenStreetMap names a Brooklyn square "Brooklyn".
-  const run = async (inside: string | null, around: string | null, osm: string, locality?: string, insideIs = "Cafe", across: "north" | "east" = "north", coarse = false, city = "Austin, Texas") => {
+  type Opts = { inside?: string | null | string[]; around?: string | null; osm?: Record<string, unknown>; insideIs?: string; across?: "north" | "east"; coarse?: boolean; city?: string; kv?: KVNamespace; photonStatus?: number };
+  const run = async (o: Opts) => {
+    const city = o.city ?? "Austin, Texas";
     const m = mockFetch((c) => {
-      if (c.host === "photon.komoot.io") return { body: { features: [{ properties: { district: osm, ...(locality ? { locality } : {}) } }] } };
+      if (c.host === "photon.komoot.io") return { status: o.photonStatus ?? 200, body: { features: [{ properties: o.osm ?? { district: "Rosslyn" } }] } };
       if (c.host === "geocoding-api.open-meteo.com" && city.includes("Japan")) return { body: { results: [{ ...AUSTIN, name: "Tokyo", admin1: "Tokyo", country: "Japan", country_code: "JP" }] } };
-      if (coarse && isHeat(c)) {
+      if (o.coarse && isHeat(c)) {
         const h = heatmap(AUSTIN.latitude, AUSTIN.longitude);
         for (const p of h.results.heatmap) p.location.geohash = p.location.geohash.slice(0, 6); // a big county's ~2.4 km squares
         return { body: h };
@@ -289,35 +291,69 @@ test("an area is named by the places inside its own square, else OpenStreetMap, 
         const lat = at ? +at[2] : AUSTIN.latitude, lon = at ? +at[1] : AUSTIN.longitude;
         // Inside the area's square but near its far edge: rounding instead of flooring would put it in the next one
         // (and with 2.4 km squares, it is in another 1 km square).
-        const step = coarse ? 0.022 : 0.01, f = Math.floor(lat / step), edge = (f + (lat / step - f < 0.5 ? 0.97 : 0.03)) * step;
+        const step = o.coarse ? 0.022 : 0.01, f = Math.floor(lat / step), edge = (f + (lat / step - f < 0.5 ? 0.97 : 0.03)) * step;
+        const inside = Array.isArray(o.inside) ? o.inside : [o.inside ?? null];
         return { body: { results: { entities: [
-          place(`in-${lat}`, "Inside", inside, edge, lon, [insideIs], ["Morning"]),
-          ...[1, 2, 3].map((i) => place(`out-${lat}-${i}`, `Across ${i}`, around, across === "north" ? lat + 0.03 : lat, across === "east" ? lon + 0.03 : lon, ["Cocktail bar"], ["Evening"])),
+          ...inside.map((n, i) => place(`in-${lat}-${i}`, `Inside ${i}`, n, edge, lon, [o.insideIs ?? "Cafe"], ["Morning"])),
+          ...[1, 2, 3].map((i) => place(`out-${lat}-${i}`, `Across ${i}`, o.around ?? null, o.across === "east" ? lat : lat + 0.03, o.across === "east" ? lon + 0.03 : lon, ["Cocktail bar"], ["Evening"])),
         ] } } };
       }
       return standardQloo()(c);
     });
     try {
-      const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), city, [{ name: "Phoebe Bridgers", kind: "artist" }]);
+      const r = await matchNeighborhoods(ENV(o.kv ?? memoryKV().kv), new Budget(48), city, [{ name: "Phoebe Bridgers", kind: "artist" }]);
       return r.neighborhoods[0]?.name;
     } finally {
       m.restore();
     }
   };
-  assert.equal(await run("East Austin", "Georgetown", "Rosslyn"), "East Austin"); // one place inside beats three across
-  assert.equal(await run(null, "Georgetown", "Rosslyn"), "Rosslyn");
-  assert.equal(await run("Ward 2", "Georgetown", "Rosslyn"), "Rosslyn"); // a ward number says nothing
-  assert.equal(await run(null, "Williamsburg", "Austin"), "Williamsburg"); // nor OpenStreetMap naming the city
-  assert.equal(await run(null, "Williamsburg", "Austin", "Dumbo"), "Dumbo"); // then its finer name (New York's district is the borough)
-  assert.equal(await run("Whitehall", "Georgetown", "Rosslyn", undefined, "Ferry terminal"), "Rosslyn"); // a place no one visits names nothing
-  assert.equal(await run(null, "Georgetown", "Clarendon", "Lyon Village"), "Clarendon"); // the district before the finer locality (Arlington, live)
-  assert.equal(await run("East Austin", "Georgetown", "Rosslyn", undefined, "Cafe", "east"), "East Austin"); // across to the east too
-  assert.equal(await run("East Austin", "Georgetown", "Rosslyn", undefined, "Cafe", "north", true), "East Austin"); // a 2.4 km square
-  assert.equal(await run("University\u2014Rosedale", "Georgetown", "Rosslyn"), "Rosslyn"); // an electoral district, Qloo's in Toronto
-  assert.equal(await run("Ginza 8-chome", "Georgetown", "Rosslyn"), "Ginza"); // a block number is an address (Tokyo, live)
-  assert.equal(await run(null, null, "Roppongi 7", undefined, "Cafe", "north", false, "Tokyo, Japan"), "Roppongi");
-  assert.equal(await run(null, null, "Zona 10"), "Zona 10"); // elsewhere a number can be the name (Guatemala City)
-  assert.equal(await run(null, "Ginza 8-chome", "Austin"), "Ginza"); // from the places around too
+  const tokyo = "Tokyo, Japan";
+  assert.equal(await run({ inside: "East Austin", around: "Georgetown" }), "East Austin"); // one place inside beats three across
+  assert.equal(await run({ around: "Georgetown" }), "Rosslyn");
+  assert.equal(await run({ inside: "Ward 2", around: "Georgetown" }), "Rosslyn"); // a ward number says nothing
+  assert.equal(await run({ around: "Williamsburg", osm: { district: "Austin" } }), "Williamsburg"); // nor OpenStreetMap naming the city
+  assert.equal(await run({ around: "Williamsburg", osm: { district: "Austin", locality: "Dumbo" } }), "Dumbo"); // then its finer name (New York's district is the borough)
+  assert.equal(await run({ inside: "Whitehall", around: "Georgetown", insideIs: "Ferry terminal" }), "Rosslyn"); // a place no one visits names nothing
+  assert.equal(await run({ around: "Georgetown", osm: { district: "Clarendon", locality: "Lyon Village" } }), "Clarendon"); // the district before the finer locality (Arlington, live)
+  assert.equal(await run({ inside: "East Austin", around: "Georgetown", across: "east" }), "East Austin"); // across to the east too
+  assert.equal(await run({ inside: "East Austin", around: "Georgetown", coarse: true }), "East Austin"); // a 2.4 km square
+  assert.equal(await run({ inside: "University\u2014Rosedale", around: "Georgetown" }), "Rosslyn"); // an electoral district, Qloo's in Toronto
+  assert.equal(await run({ inside: "Ginza 8-chome", around: "Georgetown" }), "Ginza"); // a block number is an address (Tokyo, live)
+  assert.equal(await run({ inside: "Ginza 8-chome", around: "Georgetown", city: tokyo }), "Ginza");
+  assert.equal(await run({ osm: { district: "Roppongi 7" }, city: tokyo }), "Roppongi");
+  assert.equal(await run({ inside: "鉄鋼通り三丁目", city: tokyo }), "鉄鋼通り"); // Qloo's own, in kanji
+  assert.equal(await run({ inside: "紀尾井町1", city: tokyo }), "紀尾井町");
+  assert.equal(await run({ inside: ["Ebisu minami 1", "Ebisu nishi 1", "Ebisu nishi 2"], city: tokyo }), "Ebisu nishi"); // counted once cleaned
+  assert.equal(await run({ osm: { district: "Zona 10" } }), "Zona 10"); // elsewhere a number can be the name (Guatemala City)
+  assert.equal(await run({ around: "Ginza 8-chome", osm: { district: "Austin" } }), "Ginza"); // from the places around too
+  // OpenStreetMap's spot itself: a neighbourhood is a name (Missoula's "Lower Rattlesnake", live); another kind of spot
+  // is not, and a street comes from its street ("around Fair Way", not the fair office's own name).
+  assert.equal(await run({ osm: { osm_key: "place", osm_value: "neighbourhood", name: "Lower Rattlesnake" } }), "Lower Rattlesnake");
+  assert.equal(await run({ osm: { osm_key: "amenity", name: "Missoula County Fair Office", street: "Fair Way" } }), "around Fair Way");
+  assert.equal(await run({ around: "Georgetown", osm: { osm_key: "amenity", name: "Missoula County Fair Office" } }), "Georgetown");
+  // A lookup OpenStreetMap didn't answer is asked again by the next search (not kept as a spot without a name).
+  const kv = memoryKV().kv;
+  assert.equal(await run({ around: "Georgetown", photonStatus: 503, kv }), "Georgetown");
+  assert.equal(await run({ around: "Georgetown", kv }), "Rosslyn");
+});
+
+test("an area with an airport or a travel lounge inside it is left out: it is the airport (Sydney's Mascot, live)", async () => {
+  let first = true;
+  const m = mockFetch((c) => {
+    if (isPlaces(c) && !c.params.get("filter.tags") && first) {
+      first = false;
+      const at = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+      return { body: { results: { entities: [place("lounge", "Singapore Airlines SilverKris Lounge", "Mascot", +at[2], +at[1], ["Tourist attraction", "Travel lounge"], ["Morning"]), place("bistro", "The Bistro", "Mascot", +at[2], +at[1], ["Italian restaurant"], ["Midday"])] } } };
+    }
+    return standardQloo()(c);
+  });
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.ok(r.trace.some((t) => t.step === "Filter" && t.detail === "Left out 1 area at an airport"), JSON.stringify(r.trace));
+    assert.ok(r.neighborhoods.every((h) => h.name !== "Mascot" && h.evidence.every((e) => e.name !== "The Bistro")));
+  } finally {
+    m.restore();
+  }
 });
 
 test("OpenStreetMap names cached in the old one-name form are not read (they are kept under a new key)", async () => {
@@ -375,6 +411,19 @@ test("a lookup OpenStreetMap didn't answer isn't taken for a spot without a name
       m.restore();
     }
   }
+  // Some lookups lost, as measured (2 to 4 of 6): the rest still name their areas, and the answer isn't cached.
+  {
+    const m = mockFetch((c) => {
+      if (c.host === "photon.komoot.io") return Number(c.params.get("lat")) > AUSTIN.latitude + 0.011 ? { status: 503, body: {} } : { body: { features: [{ properties: { district: "OSM District" } }] } };
+      return qloo(c);
+    });
+    try {
+      const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+      assert.ok(r.neighborhoods.some((h) => h.name === "OSM District") && r.degraded);
+    } finally {
+      m.restore();
+    }
+  }
   const m = mockFetch((c) => {
     if (c.host === "photon.komoot.io") return Number(c.params.get("lat")) > AUSTIN.latitude + 0.011 ? { body: { features: [] } } : { body: { features: [{ properties: { district: "OSM District" } }] } };
     return standardQloo({ hood: () => null })(c);
@@ -401,12 +450,16 @@ test("a lookup OpenStreetMap didn't answer isn't taken for a spot without a name
 });
 
 test("Qloo answering with a part of the city (Tokyo: the ward of Minato) is asked again around the city", async () => {
-  // Qloo writes Paris as "Paris, Paris, Paris, Paris Police Prefecture, ...": the city itself, not a part of it.
-  for (const [locality, asked] of [["Hyde Park, Austin, Travis County, Texas, United States", 2], ["Austin, Travis County, Texas, United States", 1], ["Austin, Austin, Travis County, Texas, United States", 1]] as const) {
+  // For "Paris" Qloo wrote "Paris, Paris, Paris, Paris Police Prefecture, ..." (2026-10-05): the city itself. A region
+  // named after the city ("Região Geográfica Intermediária de São Paulo, São Paulo, ...") is bigger, not a part.
+  for (const [locality, asked] of [["Hyde Park, Austin, Travis County, Texas, United States", 2], ["Austin, Travis County, Texas, United States", 1], ["Austin, Austin, Travis County, Texas, United States", 1], ["Greater Austin Region, Austin, Texas, United States", 1]] as const) {
     const m = mockFetch(standardQloo({ heat: (c) => (c.params.get("filter.location.query") ? heatmap(AUSTIN.latitude, AUSTIN.longitude, 9, 8, locality) : undefined) }));
     try {
-      const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+      const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
       assert.equal(m.calls.filter(isHeat).length, asked, locality);
+      // Your kinds of places are looked for in the same place as the map (live: Tokyo's ramen was all in Minato).
+      const cityWide = m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags"));
+      assert.ok(cityWide.length && cityWide.every((c) => !!c.params.get("filter.location.radius") === (asked === 2)), locality);
       if (asked === 2) {
         assert.ok(m.calls.filter(isHeat)[1].params.get("filter.location.radius"));
         assert.ok(r.trace.some((t) => /was only Hyde Park, a part of it/.test(t.detail)));
@@ -457,6 +510,23 @@ test("only food and activity tastes: neighborhoods come from where matching plac
     assert.equal(r.mode, "places");
     assert.equal(m.calls.filter(isHeat).length, 0, "no heatmap: Qloo's map doesn't use these tags");
     assert.deepEqual(r.neighborhoods.map((h) => [h.name, h.cells]), [["Downtown", 2], ["Hyde Park", 1]]);
+  } finally {
+    m.restore();
+  }
+});
+
+test("with only food and activity tastes, a part of the city is asked again around it too", async () => {
+  const m = mockFetch((c) =>
+    isPlaces(c) && c.params.get("filter.tags")
+      ? { body: { results: { entities: [place("a", "Ramen A", "Downtown", 30.27, -97.74, ["Ramen restaurant"], ["Evening"])] }, query: { localities: { filter: [{ name: "Hyde Park", disambiguation: "Hyde Park, Austin, Travis County, Texas, United States", location: { lat: 30.3, lon: -97.73 } }] } } } }
+      : standardQloo()(c),
+  );
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]);
+    assert.equal(r.mode, "places");
+    const cityWide = m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags"));
+    assert.deepEqual(cityWide.map((c) => !!c.params.get("filter.location.radius")), [false, true]);
+    assert.ok(r.trace.some((t) => /was only Hyde Park, a part of it/.test(t.detail)));
   } finally {
     m.restore();
   }

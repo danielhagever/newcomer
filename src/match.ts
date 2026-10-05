@@ -8,7 +8,7 @@
 //   they work as filters on places;
 // - every place carries Qloo's own neighborhood name and time-of-day fit.
 
-import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type QlooEnv, type Signals, type Tag } from "./qloo.ts";
+import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type Locality, type QlooEnv, type Signals, type Tag, type Where } from "./qloo.ts";
 import { forSearch, nameKey as typedName, rankNames, resembles, together, withoutNote } from "./names.ts";
 export { resembles };
 import { cityCenter, cellKey, km, namesFor } from "./geo.ts";
@@ -299,20 +299,18 @@ export async function matchNeighborhoods(
 
   let heat: Awaited<ReturnType<Qloo["heatmap"]>> = { points: [] };
   let cityMatches: Entity[] = [];
+  let around: Where = { query: center.query }; // where the city is: asked by name, or around its centre once that proved wrong
   if (mode === "map") {
     // 2. Where in the city do people who share these tastes concentrate? Qloo is asked about the
     // same city Newcomer located, and the locality it used is checked against it.
-    heat = await q.heatmap(mapSignals, { query: center.query });
+    heat = await q.heatmap(mapSignals, around);
     const offBy = heat.locality ? km(heat.locality, center) : heat.points.length ? medianKm(heat.points, center) : 0;
-    // Qloo can answer with a part of the city: for "Tokyo, Japan" its locality is Minato ("Minato, Tokyo, ...", one
-    // ward, 6 km across; measured on 35 cities, the only one besides Sao Paulo, whose region names the city too).
-    const [own, ...within] = (heat.locality?.name ?? "").split(",").map((x) => nameKey(x));
-    const cityKey = nameKey(center.name.split(",")[0]);
-    const partOf = own !== cityKey && within.includes(cityKey);
-    if (!heat.points.length || offBy > 50 || partOf) {
-      const why = !heat.points.length ? "was empty" : partOf ? `was only ${heat.locality!.name.split(",")[0]}, a part of it` : `was ${Math.round(offBy)} km from the located city`;
+    const part = partOfCity(heat.locality, center);
+    if (!heat.points.length || offBy > 50 || part) {
+      const why = !heat.points.length ? "was empty" : part ? `was only ${part}, a part of it` : `was ${Math.round(offBy)} km from the located city`;
       trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" ${why}; asked again for 25 km around the city centre` });
-      heat = await q.heatmap(mapSignals, { lat: center.lat, lon: center.lon, radiusM: 25000 });
+      around = { lat: center.lat, lon: center.lon, radiusM: 25000 }; // the city-wide place lookup below too
+      heat = await q.heatmap(mapSignals, around);
       if (heat.points.length && medianKm(heat.points, center) > 50)
         throw new AppError(`Qloo's map didn't line up with ${center.name}, so no neighborhoods are shown. Try the city with its state or country.`, 502);
     }
@@ -331,7 +329,7 @@ export async function matchNeighborhoods(
     const candidates = rankAreas(heat.points, 25);
     if (filterTags.length) {
       try {
-        cityMatches = (await q.places(placeSignals, { query: center.query }, 50, filterTags)).filter((p) => p.lat !== undefined && p.lon !== undefined && visitable(p));
+        cityMatches = (await q.places(placeSignals, around, 50, filterTags)).filter((p) => p.lat !== undefined && p.lon !== undefined && visitable(p));
       } catch {
         degraded = true;
       }
@@ -369,7 +367,13 @@ export async function matchNeighborhoods(
         ? "No artists, shows, films or genres to map; Qloo's taste map works from those, so the areas come from matching places instead"
         : "Qloo's taste map was empty for these signals, so the areas come from the places that match your food and activity tastes instead",
     });
-    const found = await q.places(placeSignals, { query: center.query }, 50, filterTags);
+    let { places: found, locality } = await q.placesIn(placeSignals, around, 50, filterTags);
+    const part = partOfCity(locality, center);
+    if (part) {
+      trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" was only ${part}, a part of it; asked again for 25 km around the city centre` });
+      around = { lat: center.lat, lon: center.lon, radiusM: 25000 };
+      found = await q.places(placeSignals, around, 50, filterTags);
+    }
     hoods = rankByPlaces(found, center);
     trace.push({ step: "Areas", detail: `Qloo found ${found.length} places that match your food and activity tastes; grouped them by Qloo neighborhood` });
   }
@@ -388,9 +392,19 @@ export async function matchNeighborhoods(
   // A Japanese block number after a name is an address, not a neighborhood ("Ginza 8-chome" and "Ginza 2-chome" are
   // Ginza, "Roppongi 7" Roppongi: Tokyo's names, live), so such areas merge. Elsewhere a number can be the name ("Zona
   // 10" in Guatemala City), so only the "-chome" form is dropped.
+  // Qloo writes some in Japanese, with the number in kanji or straight after the name ("鉄鋼通り三丁目", "紀尾井町1").
   const japan = /\bJapan\b/i.test(center.name);
-  const clean = (n: string) => n.replace(japan ? /\s+\d+(?:-chome)?$/i : /\s+\d+-chome$/i, "");
-  const byPlaces = (ps: Entity[]) => clean(mostCommon(ps.filter(visitable).map((e) => e.neighborhood).filter(says)) ?? "");
+  const clean = (n: string) => n.replace(japan ? /\s*\d+(?:-chome)?$|[一二三四五六七八九十]+丁目$/i : /\s+\d+-chome$/i, "");
+  // Names are counted once cleaned: "Ebisu nishi 1" and "Ebisu nishi 2" outnumber "Ebisu minami 1" (Tokyo, live).
+  const byPlaces = (ps: Entity[]) => mostCommon(ps.filter(visitable).map((e) => e.neighborhood).filter(says).map(clean)) ?? "";
+  // An area with an airport or a travel lounge inside it is the airport, not a neighborhood (live: Sydney's Mascot square,
+  // its Sunday a terminal bistro; Qloo tags the lounges, not the airport, there).
+  const airport = (h: Neighborhood) => h.evidence.some((e) => inSquare(h, e) && /\b(airport|travel lounge)\b/i.test((e.tags ?? []).join(" | ")));
+  const atAirports = hoods.filter(airport).length;
+  if (atAirports) {
+    hoods = hoods.filter((h) => !airport(h));
+    trace.push({ step: "Filter", detail: `Left out ${atAirports} area${atAirports === 1 ? "" : "s"} at an airport` });
+  }
   for (const h of hoods) if (!h.name) h.name = byPlaces([...h.evidence, ...h.matches].filter((e) => inSquare(h, e)));
   for (const h of hoods) h.name = says(h.name) ? clean(h.name) : "";
   const unnamed = hoods.filter((h) => !h.name);
@@ -463,6 +477,16 @@ export async function matchNeighborhoods(
     calls: q.calls,
     computedAt: Date.now(),
   };
+}
+
+// Qloo can answer a city asked by name with a part of it: for "Tokyo, Japan" its locality is Minato ("Minato, Tokyo,
+// ...", one ward, 6 km across; measured on 35 cities, the only one). A locality named after the city is the city or
+// bigger ("Paris Police Prefecture", "Região Geográfica Intermediária de São Paulo, São Paulo, ..."). The part's name,
+// else null.
+function partOfCity(locality: Locality | undefined, center: { name: string }): string | null {
+  const [own, ...within] = (locality?.name ?? "").split(",").map((x) => nameKey(x));
+  const city = nameKey(center.name.split(",")[0]);
+  return !own.includes(city) && within.includes(city) ? locality!.name.split(",")[0].trim() : null;
 }
 
 function medianKm(ps: { lat: number; lon: number }[], c: { lat: number; lon: number }): number {
@@ -589,7 +613,7 @@ function dedupeEvidence(hoods: Neighborhood[]): number {
 }
 
 // Judged on Qloo's categories only: a venue's name ("The Garage", "Temple Bar") says nothing.
-const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|municipal|department of|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office|business center|senior citizen|(subway|train|railway|metro|bus|transit) station|ferry terminal|airport|military|academic department|research institute|radio broadcaster|movie studio)\b/i;
+const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|municipal|department of|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office|business center|senior citizen|(subway|train|railway|metro|bus|transit) station|ferry terminal|airport|travel lounge|military|academic department|research institute|radio broadcaster|movie studio)\b/i;
 const visitable = (e: Entity) => !NOT_VISITABLE.test((e.tags ?? []).join(" | "));
 
 async function inBatches<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {

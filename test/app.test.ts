@@ -210,6 +210,9 @@ test("the one-line answer agrees in number: one runner-up comes next, two come n
   assert.match(summary(r(2)), /Zilker comes next\.$/);
   assert.match(summary(r(3)), /Zilker and Clarksville come next\.$/);
   assert.doesNotMatch(summary(r(1)), /next/);
+  // A sentence starts with a capital, even when OpenStreetMap names an area "around <street>" (live, Missoula).
+  const missoula = { city: "Missoula, Montana", neighborhoods: ["Downtown", "around Momont Road", "University District"].map(hood) } as any;
+  assert.match(summary(missoula), /\. Around Momont Road and University District come next\.$/);
 });
 
 test("a failed search says Stopped, not Done", () => {

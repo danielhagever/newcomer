@@ -450,9 +450,9 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   const namedCredit = credit.length ? found.find((e) => !isArtist(e) && nameKey(unseries(e.name)) === nameKey(bare) && credits(credit, `${e.disambiguation ?? ""} ${SERIES.exec(e.name)?.[0] ?? ""}`)) : undefined;
   const seriesOf = (e: Entity) => SERIES.exec(e.name)?.[0].replace(/^\s*\(|\)\s*$/g, "") ?? "";
   const yr = (e: Entity) => { const y = yearOf(e); return Number.isNaN(y) ? Infinity : y; };
-  const creditedTitles = credit.length ? found.map((e, i) => ({ e, i })).filter(({ e }) => !isArtist(e) && (wordsAfter(unseries(e.name), named) !== null || wordsAfter(seriesOf(e).replace(/,?\s*#\d+$/, ""), named) !== null) && credits(credit, e.disambiguation ?? "")) : [];
-  creditedTitles.sort((a, b) => yr(a.e) - yr(b.e) || a.i - b.i);
-  const credited = namedCredit ?? creditedTitles[0]?.e;
+  const creditedTitles = credit.length ? found.filter((e) => !isArtist(e) && (wordsAfter(unseries(e.name), named) !== null || wordsAfter(seriesOf(e), named) !== null) && credits(credit, e.disambiguation ?? "")) : [];
+  creditedTitles.sort((a, b) => yr(a) - yr(b)); // a stable sort: Qloo's order among the same year
+  const credited = namedCredit ?? creditedTitles[0];
   if (credited) {
     const byName = rankTyped(found, bare);
     return { pick: credited, match: "closest", list: [credited, ...(byName?.list ?? []).filter((e) => e !== credited)], offered: (e) => !!byName?.offered(e) && holdsName(e), note: "credit", searchName: !namedCredit };

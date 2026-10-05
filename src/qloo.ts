@@ -61,8 +61,8 @@ export class QlooError extends AppError {}
 const TIMEOUT_MS = 12000;
 // All of a search's Qloo calls share 40 s: each waits at most what is left (the heatmap all of it), so a slow
 // heatmap, the 25 km one after it and a retry can't keep an agent waiting past a client's usual 60 s limit.
-// OpenStreetMap's area names come after, three at a time, 5 s a round at most (three rounds for eight areas); a
-// live search takes 10 to 17 s in all.
+// OpenStreetMap's area names come after, three at a time, 5 s a round at most (three rounds for the seven areas); a
+// live search takes 10 to 22 s in all.
 const TOTAL_MS = 40000;
 
 // Qloo answers 429 to the sixth call within about a second (measured 2026-10-03 after a quiet minute:
@@ -192,9 +192,7 @@ export class Qloo {
         } as HeatPoint;
       })
       .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Number.isFinite(p.affinity));
-    const l = body?.query?.localities?.filter?.[0];
-    const lat = num(l?.location?.lat), lon = num(l?.location?.lon);
-    const locality = l && Number.isFinite(lat) && Number.isFinite(lon) ? { name: String(l.disambiguation ?? l.name ?? ""), lat, lon } : undefined;
+    const locality = localityOf(body);
     return { points, ...(locality ? { locality } : {}) };
   }
 
@@ -202,6 +200,11 @@ export class Qloo {
   // places that carry at least one of the tags (ramen, bouldering, natural wine...): measured, food
   // and activity tags work as filters on places but do nothing as heatmap signals.
   async places(signals: Signals, where: Where, take = 8, filterTags: string[] = []): Promise<Entity[]> {
+    return (await this.placesIn(signals, where, take, filterTags)).places;
+  }
+
+  // The same, with the locality Qloo used for a city asked by name (it answers "Tokyo, Japan" with Minato, as for maps).
+  async placesIn(signals: Signals, where: Where, take = 8, filterTags: string[] = []): Promise<{ places: Entity[]; locality?: Locality }> {
     const body = await this.get("/v2/insights", {
       "filter.type": "urn:entity:place",
       ...whereParams(where),
@@ -209,8 +212,15 @@ export class Qloo {
       ...(filterTags.length ? { "filter.tags": filterTags.join(","), "operator.filter.tags": "union" } : {}),
       take: String(Math.min(50, take)),
     });
-    return (body?.results?.entities ?? []).map(toEntity).filter((e: Entity) => e.name);
+    const locality = localityOf(body);
+    return { places: (body?.results?.entities ?? []).map(toEntity).filter((e: Entity) => e.name), ...(locality ? { locality } : {}) };
   }
+}
+
+function localityOf(body: any): Locality | undefined {
+  const l = body?.query?.localities?.filter?.[0];
+  const lat = num(l?.location?.lat), lon = num(l?.location?.lon);
+  return l && Number.isFinite(lat) && Number.isFinite(lon) ? { name: String(l.disambiguation ?? l.name ?? ""), lat, lon } : undefined;
 }
 
 export interface Locality {
