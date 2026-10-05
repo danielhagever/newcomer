@@ -107,9 +107,9 @@ export const T = [
   ["Rocky (Rocky IV)", "movie", (l) => /^rocky iv( \(|$)/i.test(l)],
   ["Toy Story (Toy Story 3)", "movie", (l) => /^toy story 3( \(|$)/i.test(l)],
   ["Indiana Jones (Raiders of the Lost Ark)", "movie", title("Raiders of the Lost Ark")],
-  // Policy (pass 8): an entry named exactly the name wins over a title named in the note, which is offered under
-  // "Not it?" ("Chicago P.D. (Chicago Fire)" has the same shape and means Chicago P.D.).
-  ["Fast & Furious (Fast Five)", "movie", at("fast & furious", "2009")],
+  // "Fast Five" adds only a number to the name's words, so it's a sequel, as "Toy Story (Toy Story 3)" (pass 17; pass 8
+  // had made it the 2009 film); "Chicago P.D. (Chicago Fire)" adds a word, so there the exact name wins.
+  ["Fast & Furious (Fast Five)", "movie", title("Fast Five")],
   ["Mission: Impossible (Fallout)", "movie", title("Mission: Impossible - Fallout")],
   ["The Matrix (Reloaded)", "movie", title("The Matrix Reloaded")],
   ["Pirates of the Caribbean (Dead Man's Chest)", "movie", title("Pirates of the Caribbean: Dead Man's Chest")],
@@ -218,6 +218,13 @@ export const T = [
   ["The Office (Season 3)", "tv_show", at("the office", "2005")],
   ["Breaking Bad (Season 5)", "tv_show", only("Breaking Bad")],
   ["The Fast and the Furious (2)", "movie", title("2 Fast 2 Furious")],
+  // pass 17 (written before recording): a series that names its films inconsistently; numbers that work
+  ["Fast & Furious (7)", "movie", title("Furious 7")],
+  ["Fast & Furious (5)", "movie", title("Fast Five")],
+  ["Fast & Furious (10)", "movie", title("Fast X")],
+  ["Rambo (2)", "movie", (l) => /^rambo: first blood part ii( \(|$)/i.test(l)],
+  ["Bad Boys (3)", "movie", (l) => /^bad boys for life( \(|$)/i.test(l)],
+  ["Deadpool (3)", "movie", title("Deadpool & Wolverine")],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],

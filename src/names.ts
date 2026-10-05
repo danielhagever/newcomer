@@ -86,7 +86,7 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 205 such inputs are recorded in test/note-fixtures.json):
+// live answers for 211 such inputs are recorded in test/note-fixtures.json):
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
@@ -98,7 +98,8 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 //   so "Ye (Kanye West)" is not found rather than guessed;
 // - when an entry is named exactly the name (or one letter off, two in a long name: "Better Call Saull"), it wins
 //   over a title named in the note, which is offered first under "Not it?" ("Better Call Saul (Breaking Bad)",
-//   "Chicago P.D. (Chicago Fire)", so also "Fast & Furious (Fast Five)" is the 2009 film); and a title must continue
+//   "Chicago P.D. (Chicago Fire)"; a note adding only a number to the name's words is a sequel instead: "Fast &
+//   Furious (Fast Five)" is Fast Five); and a title must continue
 //   the name after a separator, a linking word or a number ("Star Wars: Episode V", "The Fast and the Furious: Tokyo
 //   Drift", "Harry Potter and the...", "The Godfather Part II"), or start with the note that way and hold the name
 //   ("Furiosa: A Mad Max Saga", "The Lost World: Jurassic Park", "War for the Planet of the Apes"): "The Mandalorian
@@ -111,8 +112,8 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 //   Saga: New Moon), the title holding more of the note's words wins ("Star Wars (Episode 1)" is Episode I, not
 //   Rogue One), and kind words in the note hide nothing ("SpongeBob (movie)" is The SpongeBob SquarePants Movie).
 //   A note that is only a number asks for the Nth: the title with that number right after the name ("Shrek (2)" is
-//   Shrek 2); else Qloo's own top answer when it carries no number and belongs to the series ("Mad Max (2)" is The
-//   Road Warrior); else the Nth by year of the titles starting with the name, from the one named exactly that,
+//   Shrek 2, "The Fast and the Furious (2)" 2 Fast 2 Furious); else Qloo's own top answer when it carries no number but
+//   the asked one and belongs to the series ("Mad Max (2)" is The Road Warrior, "Fast & Furious (7)" Furious 7); else the Nth by year of the titles starting with the name, from the one named exactly that,
 //   titles numbered otherwise left out ("The Hunger Games (2)" is Catching Fire, not Mockingjay - Part 2). On a TV
 //   show a number or a season is a season of the show ("Skins (series 2)", "Squid Game (Season 2)" are the shows,
 //   not a making-of special); a title holding the name and the number also counts ("2 Fast 2 Furious"). Known limit: an
@@ -257,7 +258,8 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   const startsWithName = (e: Entity) => after(e.name, named) !== null;
   // A note that is only a number ("The Hunger Games (2)", "Frozen (Part 2)") asks for the Nth film: the title
   // numbered that way right after the name ("Shrek 2", "Kill Bill: Vol. 2", "The Lord of the Rings: The Two
-  // Towers"); else Qloo's own top answer for "Name (N)", when it carries no number and belongs to the series ("Mad
+  // Towers"); else Qloo's own top answer for "Name (N)", when it carries no number but the asked one and belongs to
+  // the series ("Mad
   // Max (2)" is The Road Warrior; not for the first); else the Nth by year of the titles starting with the name,
   // from the one named exactly that, titles numbered otherwise left out ("The Hunger Games (2)" is Catching Fire,
   // not Mockingjay - Part 2). On a TV show a number is a season, and Qloo keeps a show as one entry: the show.
@@ -266,7 +268,7 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   const show = (anchor ?? found[0])?.types.includes("urn:entity:tv_show");
   // A season note on a show ("Stranger Things (Season 5)", "Squid Game (Season 2)") is the show: no companion or
   // making-of title ("Stranger Things 5: Behind the Episode", "Squid Game: Making Season 2") is taken or offered first.
-  const season = show && numbers.length === 1 && titleWords.length === 1;
+  const season = show && numbers.length === 1;
   if (numbers.length === 1 && titleWords.length === 1 && !show) {
     const n = NUMBER.get(numbers[0])! + 1;
     // The number a title gives itself right after the name ("Rocky III", "The Two Towers"), if any.
@@ -275,15 +277,20 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
       const w = rest?.find((x) => !PART.has(x) && !SMALL.has(x) && !LINKS.has(x));
       return w && NUMBER.has(w) ? w : null;
     };
-    // Or a title holding the name and the number, not after a part word ("2 Fast 2 Furious"; not "Mockingjay - Part 2").
-    const carries = (e: Entity) => {
+    // Or a title holding the name and the number, not after a part word ("2 Fast 2 Furious"; not "The Hunger Games:
+    // Mockingjay - Part 2", whose 2 belongs to Mockingjay).
+    const ownsNumber = (e: Entity) => {
       const ws = words(e.name);
-      return !isArtist(e) && !startsWithName(e) && holdsName(e) && ws.some((w, i) => sameWord(numbers[0], w) && !(i > 0 && PART.has(ws[i - 1])));
+      return ws.some((w, i) => sameWord(numbers[0], w) && !(i > 0 && PART.has(ws[i - 1])));
     };
+    const carries = (e: Entity) => !isArtist(e) && holdsName(e) && ownsNumber(e);
     const numbered = [...found.filter((e) => ownNumber(e) && sameWord(numbers[0], ownNumber(e)!)), ...found.filter(carries)];
     const hasNumber = (e: Entity) => words(e.name).some((w) => NUMBER.has(w));
     const top = found[0];
-    const trusted = n > 1 && !!top && !isArtist(top) && top !== anchor && !hasNumber(top) && (anchor ? yearOf(top) > yearOf(anchor) : holdsName(top));
+    // Its number, if any, is the one asked for and it holds a word of the name ("Fast & Furious (7)" is Furious 7, "(5)"
+    // Fast Five; an unrelated "Inside Out 2" is not taken).
+    const numberAsked = (e: Entity) => !hasNumber(e) || (ownsNumber(e) && named.some((w) => words(e.name).some((x) => sameWord(w, x))));
+    const trusted = n > 1 && !!top && !isArtist(top) && top !== anchor && numberAsked(top) && (anchor ? yearOf(top) > yearOf(anchor) : holdsName(top));
     const since = anchor ? yearOf(anchor) : NaN;
     const later = found
       .filter((e) => e !== anchor && !isArtist(e) && startsWithName(e) && !ownNumber(e) && !Number.isNaN(yearOf(e)) && (Number.isNaN(since) || yearOf(e) > since))
@@ -314,7 +321,7 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   // The note names one title exactly ("Indiana Jones (Raiders of the Lost Ark)", "La Casa de Papel (Money Heist)"):
   // a name of two words or more, not all kind words, never an act (an act's note is as often a hometown that is
   // also a band's name: "Moonsprout (New England)"). The name alone is searched first, since an entry named exactly
-  // that wins and may not be among the whole text's answers ("Fast & Furious (Fast Five)" found Fast Five only).
+  // that wins and may not be among the whole text's answers ("Better Call Saul" may be missing from them).
   // "aka" says the note is another name, so then an act may take it too, and one word is enough ("Ye (aka Kanye West)").
   // The note as typed first ("That '70s Show" ends in a kind word but is a title), then without its kind words.
   const asTitle = (cands: Entity[]) => {
