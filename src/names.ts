@@ -86,7 +86,7 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 232 such inputs are recorded in test/note-fixtures.json):
+// live answers for 236 such inputs are recorded in test/note-fixtures.json):
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
@@ -241,7 +241,7 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   // Better Call Saul).
   // So does the same name with a number written otherwise ("Fantastic 4" is Fantastic Four).
   const sameName = (a: string, b: string) => { const x = words(a), y = words(b); return x.length === y.length && x.every((w, i) => sameWord(w, y[i])); };
-  const named_ = !!r && (r.match !== "closest" || sameName(r.pick.name, bare) || typoDistance(squashed(r.pick.name), squashed(bare)) <= (squashed(bare).length > 10 ? 2 : 1));
+  const named_ = !!r && (r.match !== "closest" || sameName(r.pick.name, bare) || (typoDistance(squashed(r.pick.name), squashed(bare)) <= (squashed(bare).length > 10 ? 2 : 1)));
   const noteWords = words(noted).filter((w) => !SMALL.has(w));
   // A note holding the whole name and adding words is a fuller name ("Whitney (Whitney Houston)", "Amy (Amy
   // Winehouse)"), not a subtitle; adding a number, it's a sequel ("Toy Story (Toy Story 3)", "The Hunger
@@ -316,9 +316,9 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
     // ("The Making of The Matrix", "The Matrix Resurrections" are left to the count by year).
     const second = !!anchor && found[0] === anchor;
     const top = second ? found[1] : found[0];
-    // A top answer holding the name is the series' own; one that doesn't must come after the film named exactly the
-    // name ("Dark City" is not "The Matrix (2)"), since the film named exactly the name may not be the first ("Fast &
-    // Furious" is the fourth, so "Fast & Furious (3)" is Tokyo Drift).
+    // A top answer holding the name is the series' own; one that doesn't must come after the film counted as named
+    // ("Dark City" is not "The Matrix (2)"), since that film may not be the first ("Fast & Furious" is the fourth, and
+    // "Fast & Furious 6", one character off, the sixth: "Fast & Furious (3)" is Tokyo Drift).
     const trusted = n > 1 && !!top && !isArtist(top) && numberAsked(top) && (holdsName(top) || (!!anchor && yearOf(top) > yearOf(anchor))) && (!second || !holdsName(top));
     const since = anchor ? yearOf(anchor) : NaN;
     const later = found
@@ -330,7 +330,12 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
     // When the count can't reach N (a film missing from Qloo's answers), Qloo's second answer may stand as a title
     // starting with the name ("Twilight (5)": Twilight, then Breaking Dawn - Part 2; Eclipse is never returned).
     const fallback = second && n > 1 && !!top && !isArtist(top) && startsWithName(top) && numberAsked(top) ? top : undefined;
-    const pick = numbered[0] ?? (trusted ? top : series[n - 1] ?? fallback);
+    // A top answer whose own part number differs from the asked one is taken only when the count can't answer
+    // ("Harry Potter (3)" is Prisoner of Azkaban by the count, not Deathly Hallows: Part 2, which Qloo lists first for
+    // any number; "Mission: Impossible (7)" can't be counted, so Dead Reckoning Part One stands).
+    const ws = top ? words(top.name) : [];
+    const otherPart = ws.some((w, i) => i > 0 && PART.has(ws[i - 1]) && NUMBER.has(w) && !sameWord(numbers[0], w));
+    const pick = numbered[0] ?? (trusted && !(otherPart && series[n - 1]) ? top : series[n - 1] ?? fallback);
     if (pick) {
       const byName = rankTyped(found, bare);
       return { pick, match: "closest", list: [pick, ...(byName?.list ?? []).filter((e) => e !== pick)], offered: (e) => !!byName?.offered(e) && holdsName(e), note: "title", searchName: !numbered.length && !anchor && !trusted };

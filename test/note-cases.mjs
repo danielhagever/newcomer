@@ -249,6 +249,11 @@ export const T = [
   ["Harry Potter (8)", "movie", title("Harry Potter and the Deathly Hallows: Part 2")],
   ["Twilight (4)", "movie", title("The Twilight Saga: Breaking Dawn - Part 1"), "Qloo's top answer is Breaking Dawn - Part 2, and Eclipse is never returned"],
   ["Twilight (5)", "movie", title("The Twilight Saga: Breaking Dawn - Part 2")],
+  // pass 21 (written before recording): a series where Qloo's top answer is always the last part
+  ["Harry Potter (3)", "movie", title("Harry Potter and the Prisoner of Azkaban")],
+  ["Harry Potter (4)", "movie", title("Harry Potter and the Goblet of Fire")],
+  ["Twilight (3)", "movie", title("The Twilight Saga: Eclipse")],
+  ["Dune (3)", "movie", title("Dune: Part Three")],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],
