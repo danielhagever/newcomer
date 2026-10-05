@@ -86,7 +86,7 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 240 such inputs are recorded in test/note-fixtures.json):
+// live answers for 245 such inputs are recorded in test/note-fixtures.json):
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
@@ -106,7 +106,8 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 //   ("Furiosa: A Mad Max Saga", "The Lost World: Jurassic Park", "War for the Planet of the Apes"): "The Mandalorian
 //   (Star Wars)" is not Lego Star Wars: The Mandalorian, and "Amy (Winehouse documentary)" is not Amy Winehouse. A
 //   note holding the whole name plus words is a fuller name, not a subtitle ("Amy (Amy Winehouse)" is Amy, 2015),
-//   unless it adds a number ("Toy Story (Toy Story 3)", "(The Hunger Games: Mockingjay Part 1)"). Linking words
+//   unless it adds a number ("Toy Story (Toy Story 3)", "(The Hunger Games: Mockingjay Part 1)") or continues the
+//   name after a separator ("Mad Max (Mad Max: Fury Road)"). Linking words
 //   ("to", "in", "presents") and part words ("Part", "Vol.") are skipped: "Back to the Future (Part 2)" is Back to
 //   the Future Part II, "Toy Story (Part 3)" Toy Story 3, "Fast & Furious (Hobbs & Shaw)" Fast & Furious Presents:
 //   Hobbs & Shaw. A franchise's own words may come before the separator ("Twilight (New Moon)" is The Twilight
@@ -233,7 +234,9 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   const told = words(noted).filter((w) => !SMALL.has(w) && !closeTo(w, named, false));
   const holds = (e: Entity, ws: string[]) => !!ws.length && ws.every((w) => closeTo(w, words(e.name), false));
   // Kind words don't make an entry the note's ("SpongeBob (movie)" keeps The SpongeBob Movie).
-  const holdsNote = (e: Entity) => holds(e, told.filter((w) => !KIND.has(w)));
+  // As written (number forms and short forms aside), like the title rule below: a typo-tolerant match would hide
+  // "Dan Carlin's Hardcore History" for "Hardcore History (Dan Carlin)" without the title rule taking it back.
+  const holdsNote = (e: Entity) => { const ws = told.filter((w) => !KIND.has(w)); return !!ws.length && ws.every((w) => words(e.name).some((x) => sameWord(w, x))); };
   const isArtist = (e: Entity) => e.types.includes("urn:entity:artist");
   // The name alone, among entries that don't hold the note's words.
   const r = rankTyped(found.filter((e) => !holdsNote(e)), bare);
@@ -248,7 +251,8 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   // A note holding the whole name and adding words is a fuller name ("Whitney (Whitney Houston)", "Amy (Amy
   // Winehouse)"), not a subtitle; adding a number, it's a sequel ("Toy Story (Toy Story 3)", "The Hunger
   // Games (The Hunger Games: Mockingjay Part 1)").
-  const fuller = named.every((w) => noteWords.some((x) => sameWord(w, x))) && !told.some((w) => NUMBER.has(w));
+  // Nor when the note continues the name after a separator, as a title does ("Mad Max (Mad Max: Fury Road)").
+  const fuller = named.every((w) => noteWords.some((x) => sameWord(w, x))) && !told.some((w) => NUMBER.has(w)) && !["sep", "link"].includes(after(noted, named) ?? "");
   // A title must hold the note's words that aren't kind words ("Batman (movie)" is not Batman: The Movie).
   // Part words only mark the number ("Toy Story (Part 3)" is Toy Story 3).
   const titleWords = told.filter((w) => !KIND.has(w) && !PART.has(w));

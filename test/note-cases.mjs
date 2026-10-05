@@ -259,6 +259,12 @@ export const T = [
   ["The Hobbit (2)", "movie", title("The Hobbit: The Desolation of Smaug")],
   ["The Hobbit (1)", "movie", title("The Hobbit: An Unexpected Journey"), "an older film named exactly The Hobbit (1977) is the first by the count"],
   ["Mission: Impossible (6)", "movie", title("Mission: Impossible - Fallout")],
+  // pass 23 (written before recording): a note repeating the series name before a separator; a possessive in the title
+  ["Mad Max (Mad Max: Fury Road)", "movie", title("Mad Max: Fury Road")],
+  ["Mission: Impossible (Mission: Impossible - Fallout)", "movie", title("Mission: Impossible - Fallout")],
+  ["Star Trek (Star Trek: The Next Generation)", "tv_show", title("Star Trek: The Next Generation")],
+  ["Hardcore History (Dan Carlin)", "podcast", title("Dan Carlin's Hardcore History")],
+  ["Poirot (Agatha Christie)", "tv_show", at("poirot", "1989")], // Qloo names the show plain "Poirot" (my expected title was wrong)
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],
