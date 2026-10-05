@@ -265,6 +265,17 @@ export const T = [
   ["Star Trek (Star Trek: The Next Generation)", "tv_show", title("Star Trek: The Next Generation")],
   ["Hardcore History (Dan Carlin)", "podcast", title("Dan Carlin's Hardcore History")],
   ["Poirot (Agatha Christie)", "tv_show", at("poirot", "1989")], // Qloo names the show plain "Poirot" (my expected title was wrong)
+  // pass 24 (written before recording): a fuller name after a linking word; a note repeating the name before a subtitle;
+  // a note naming part one; ordinal notes
+  ["Alexander (Alexander the Great)", "movie", at("alexander", "2004")],
+  ["Cyrano (Cyrano de Bergerac)", "movie", at("cyrano", "2021")],
+  ["Twilight (Twilight: New Moon)", "movie", title("The Twilight Saga: New Moon")],
+  ["Jurassic Park (Jurassic Park: The Lost World)", "movie", title("The Lost World: Jurassic Park")],
+  ["Rambo (First Blood)", "movie", title("First Blood")],
+  ["Shrek (2nd film)", "movie", title("Shrek 2")],
+  ["Shrek (second film)", "movie", title("Shrek 2")],
+  ["Toy Story (third film)", "movie", title("Toy Story 3")],
+  ["The Matrix (second one)", "movie", title("The Matrix Reloaded")],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],
