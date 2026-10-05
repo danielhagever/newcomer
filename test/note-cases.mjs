@@ -234,6 +234,21 @@ export const T = [
   // pass 19 (written before recording): the name's number typed as a digit
   ["Fantastic 4 (2)", "movie", title("Fantastic Four: Rise of the Silver Surfer")],
   ["Fantastic 4 (II)", "movie", title("Fantastic Four: Rise of the Silver Surfer")],
+  // pass 20 (written before recording): long series where some films number themselves and others don't
+  ["Mission: Impossible (7)", "movie", (l) => /^mission: impossible - dead reckoning/i.test(l)],
+  ["Mission: Impossible (4)", "movie", title("Mission: Impossible - Ghost Protocol")],
+  ["Fast & Furious (3)", "movie", title("The Fast and the Furious: Tokyo Drift")],
+  ["Rocky (5)", "movie", title("Rocky V")],
+  ["Twister (2)", "movie", title("Twisters")],
+  ["Top Gun (2)", "movie", title("Top Gun: Maverick")],
+  ["Batman (2)", "movie", title("Batman Returns"), "Qloo's searches never return Batman Returns"],
+  ["Harry Potter (7)", "movie", title("Harry Potter and the Deathly Hallows: Part 1"), "Qloo's searches never return Deathly Hallows: Part 1"],
+  ["The Hunger Games (4)", "movie", title("The Hunger Games: Mockingjay - Part 2")],
+  ["Superman (2)", "movie", (l) => /^superman ii( \(|$)/i.test(l)],
+  ["The Hunger Games (3)", "movie", title("The Hunger Games: Mockingjay - Part 1")],
+  ["Harry Potter (8)", "movie", title("Harry Potter and the Deathly Hallows: Part 2")],
+  ["Twilight (4)", "movie", title("The Twilight Saga: Breaking Dawn - Part 1"), "Qloo's top answer is Breaking Dawn - Part 2, and Eclipse is never returned"],
+  ["Twilight (5)", "movie", title("The Twilight Saga: Breaking Dawn - Part 2")],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],

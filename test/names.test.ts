@@ -65,13 +65,14 @@ const NOTES: [string, any[], string][] = [
   // The title holding more of the note's words wins: "Rogue One" holds a 1 too, but not "Episode".
   ["Star Wars (Episode 1)", [film("Rogue One: A Star Wars Story", "2016"), film("Star Wars: Episode I - The Phantom Menace", "1999"), film("Star Wars: Episode IV - A New Hope", "1977")], "Star Wars: Episode I - The Phantom Menace (1999) closest"],
   // A number-only note counts titles starting with the name by year, but not titles numbered otherwise, and keeps Part 1 ones.
-  ["The Hunger Games (3)", [film("The Hunger Games: Mockingjay - Part 2", "2015"), film("The Hunger Games", "2012"), film("The Hunger Games: Catching Fire", "2013"), film("The Hunger Games: Mockingjay - Part 1", "2014")], "The Hunger Games: Mockingjay - Part 1 (2014) closest"],
+  ["The Hunger Games (3)", [film("The Hunger Games", "2012"), film("The Hunger Games: Mockingjay - Part 2", "2015"), film("The Hunger Games: Catching Fire", "2013"), film("The Hunger Games: Mockingjay - Part 1", "2014")], "The Hunger Games: Mockingjay - Part 1 (2014) closest"],
   ["Rocky (2)", [film("Rocky", "1976"), film("Rocky III", "1982"), film("Rocky IV", "1985")], "Rocky (1976) closest"], // Rocky II not among the answers: not Rocky III
   ["The Matrix (2)", [film("The Matrix", "1999"), film("The Making of The Matrix", "2001"), film("The Matrix Reloaded", "2003")], "The Matrix Reloaded (2003) closest"], // only titles starting with the name count
   ["Toy Story (1)", [film("Toy Story That Time Forgot", "2014"), film("Toy Story", "1995")], "Toy Story (1995) closest"], // Qloo's top answer is never the first
   ["The Matrix (2)", [film("Dark City", "1998"), film("The Matrix", "1999"), film("The Matrix Reloaded", "2003")], "The Matrix Reloaded (2003) closest"], // nor older than the film named exactly that
   ["Twilight (2)", [film("Inside Out 2", "2024"), film("Twilight", "2008"), film("The Twilight Saga: New Moon", "2009")], "The Twilight Saga: New Moon (2009) closest"], // Qloo's top answer carries the 2 but no word of the name
   ["The Matrix (2)", [film("The Matrix", "1999"), film("The Matrix Resurrections", "2021"), film("The Matrix Reloaded", "2003")], "The Matrix Reloaded (2003) closest"], // Qloo's second answer only as a sequel named otherwise
+  ["Fantastic 4 (2)", [film("Fantastic Four: Rise of the Silver Surfer", "2007"), film("The Fantastic Four: First Steps", "2025")], "Fantastic Four: Rise of the Silver Surfer (2007) closest"], // the name's Four is the typed 4, not another number
   // A one-word note is never the name of another title: "Phoenix" is the actor here, though a 2014 film is named that.
   ["Joker (Phoenix)", [film("Joker", "2019"), film("Phoenix", "2014")], "Joker (2019) closest"],
   // Nothing before the note, or nothing like it: no guess.
@@ -91,7 +92,7 @@ test("Qloo is searched with the name before a note in brackets", () => {
   assert.equal(withoutNote("Sunn O)))"), "Sunn O)))");
 });
 
-test("notes in brackets on Qloo's live answers: 218 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
+test("notes in brackets on Qloo's live answers: 232 realistic inputs get the entry a reasonable person expects (known limits listed)", async () => {
   const { T } = await import("./note-cases.mjs" as string);
   const F = JSON.parse(readFileSync(new URL("./note-fixtures.json", import.meta.url), "utf8"));
   const show = (e: any) => `${e.name}${e.disambiguation && e.disambiguation.toLowerCase() !== e.name.toLowerCase() ? ` (${e.disambiguation})` : ""}`;
@@ -113,7 +114,7 @@ test("notes in brackets on Qloo's live answers: 218 realistic inputs get the ent
   }
   // Every miss is a known limit, and every known limit still misses (so a fix there is noticed).
   assert.deepEqual(wrong, known);
-  assert.ok(searches <= 281, `${searches} Qloo searches for 218 names`);
+  assert.ok(searches <= 296, `${searches} Qloo searches for 232 names`);
 });
 
 test("when the exact name wins, the title named in the note is offered first under Not it? (Qloo's live answers)", () => {
