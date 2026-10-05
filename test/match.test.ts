@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { matchNeighborhoods, planDay, rankAreas, resembles } from "../src/match.ts";
-import { signalParams } from "../src/qloo.ts";
+import { Qloo, signalParams } from "../src/qloo.ts";
 import { cityCenter, km } from "../src/geo.ts";
 import { AppError, Budget } from "../src/limits.ts";
 import { AUSTIN, ENV, heatmap, memoryKV, mockFetch, place, places, tag, type Call } from "./mock.ts";
@@ -129,7 +129,7 @@ test("the heatmap is asked without take or boundary (the live API rejects take >
   }
 });
 
-test("the heatmap waits 25 s for Qloo, its retry after a 429 too, every other Qloo call 12 s (a live heatmap took over 12 s once)", async () => {
+test("the heatmap waits 40 s for Qloo, its retry after a 429 too, every other Qloo call 12 s (live heatmaps took over 12 s and 20.9 s)", async () => {
   const m = mockFetch(standardQloo());
   const timeout = AbortSignal.timeout;
   const limit = new Map<AbortSignal, number>();
@@ -145,7 +145,7 @@ test("the heatmap waits 25 s for Qloo, its retry after a 429 too, every other Ql
   try {
     const { kv } = memoryKV();
     await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
-    assert.deepEqual(asked.filter(([what]) => what === "urn:heatmap").map(([, ms]) => ms), [25000, 25000]);
+    assert.deepEqual(asked.filter(([what]) => what === "urn:heatmap").map(([, ms]) => ms), [40000, 40000]);
     const rest = asked.filter(([what]) => what !== "urn:heatmap");
     assert.ok(rest.length >= 2 && rest.every(([, ms]) => ms === 12000), JSON.stringify(rest));
   } finally {
@@ -171,6 +171,22 @@ test("a Qloo call that runs out of time says so, never 'not found' or 'no taste 
     } finally {
       globalThis.fetch = mocked;
       m.restore();
+    }
+  }
+});
+
+test("a Qloo call that fails is still listed among the calls, with status 0", async () => {
+  const timeout = () => new DOMException("The operation was aborted due to timeout", "TimeoutError");
+  const cutOff = () => Promise.resolve(new Response(new ReadableStream({ start: (c) => c.error(timeout()) }), { status: 200 }));
+  for (const fail of [() => Promise.reject(timeout()), cutOff, () => Promise.reject(new TypeError("fetch failed"))]) {
+    const mocked = globalThis.fetch;
+    globalThis.fetch = fail as typeof fetch;
+    try {
+      const q = new Qloo(ENV(memoryKV().kv), new Budget(48));
+      await assert.rejects(q.search("Phoebe Bridgers"));
+      assert.deepEqual(q.calls.map((c) => [c.path, c.status]), [["/search", 0]]);
+    } finally {
+      globalThis.fetch = mocked;
     }
   }
 });
@@ -292,7 +308,7 @@ test("a video game is searched as Qloo's urn:entity:videogame (it answers 400 to
       return c.params.get("types") === "urn:entity:videogame"
         ? { body: { results: [
             { entity_id: UUID(7), name: "Minecraft", disambiguation: "2011-11-18, Mojang AB", types: ["urn:entity:videogame"] },
-            { entity_id: UUID(8), name: "Minecraft Dungeons", disambiguation: "2020-05-26, Mojang AB", types: ["urn:entity:videogame"] },
+            { entity_id: UUID(8), name: "Minecraft Dungeons", disambiguation: "2020-05-26,   Mojang  AB", types: ["urn:entity:videogame"] },
           ] } }
         : { status: 400, body: { error: { message: "types/0: must be equal to one of the allowed values" } } };
     return std(c);
@@ -302,7 +318,7 @@ test("a video game is searched as Qloo's urn:entity:videogame (it answers 400 to
     const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Minecraft", kind: "video_game" }, { name: "Phoebe Bridgers", kind: "artist" }]);
     const game = r.resolved.find((x) => x.input === "Minecraft")!;
     assert.equal(game?.match, "exact");
-    assert.deepEqual(game.alternatives.map((a) => a.type), ["game"]);
+    assert.deepEqual(game.alternatives.map((a) => [a.name, a.type]), [["Minecraft Dungeons (2020-05-26, Mojang AB)", "game"]]); // Qloo's runs of spaces closed up
   } finally {
     m.restore();
   }

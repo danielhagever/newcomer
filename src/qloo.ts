@@ -54,10 +54,11 @@ export interface Provenance {
 
 export class QlooError extends AppError {}
 
-// Measured: tag searches take 3-4 s. A city's heatmap took 1.8-6.3 s alone (2026-10-05) and 8-10 s while other
-// searches ran, and once over 12 s (a review's search failed with "took too long"), so it may take longer.
+// Measured: tag searches take 3-4 s. A city's heatmap took 1.8-6.3 s alone (2026-10-05), 8-10 s while other
+// searches ran, over 12 s once and 20.9 s once (four books, a podcast and two games; the same call again also took
+// over 20 s, so waiting helps more than asking again).
 const TIMEOUT_MS = 12000;
-export const HEATMAP_TIMEOUT_MS = 25000;
+export const HEATMAP_TIMEOUT_MS = 40000;
 
 // Qloo answers 429 to the sixth call within about a second (measured 2026-10-03 after a quiet minute:
 // 5 at once all 200, 6 at once lose one, 8 lose three; a steady 4 a second loses the sixth call every

@@ -95,7 +95,11 @@ export const validQlooId = (id: string) => TAG_ID.test(id) || ENTITY_ID.test(id)
 // timeouts) stops the search with its real message instead of turning into "not found".
 const notFound = (e: unknown) => e instanceof AppError && (e.status === 400 || e.status === 404);
 
-const label = (e: Entity) => (e.disambiguation && normalizeName(e.disambiguation) !== normalizeName(e.name) ? `${e.name} (${e.disambiguation})` : e.name);
+// Qloo's disambiguations can hold runs of spaces ("1986, Stephen        King").
+const label = (e: Entity) => {
+  const d = e.disambiguation?.replace(/\s+/g, " ").trim();
+  return d && normalizeName(d) !== normalizeName(e.name) ? `${e.name} (${d})` : e.name;
+};
 
 // Qloo's search (semantic search above all) always returns something, even for "zzqx": names are matched
 // and ranked by names.ts (an exact name first, else only a candidate that resembles what was typed).
