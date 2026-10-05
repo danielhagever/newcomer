@@ -86,7 +86,7 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 
 
 // A note in brackets at the end is how an agent or a person says which one. It is read in this order (Qloo's
-// live answers for 199 such inputs are recorded in test/note-fixtures.json):
+// live answers for 205 such inputs are recorded in test/note-fixtures.json):
 // - a title holding both the name and every word of the note that isn't already in the name or a kind word, each
 //   as written, as a number in another form ("5", "V", "Five") or as a short form ("Pt. II", "Vol. 3"), in either
 //   order ("Star Wars (The Empire Strikes Back)" is Episode V; "Parts Unknown (Anthony Bourdain)" is Anthony
@@ -114,7 +114,8 @@ function wordsResemble(a: string[], b: string[], half: boolean): boolean {
 //   Shrek 2); else Qloo's own top answer when it carries no number and belongs to the series ("Mad Max (2)" is The
 //   Road Warrior); else the Nth by year of the titles starting with the name, from the one named exactly that,
 //   titles numbered otherwise left out ("The Hunger Games (2)" is Catching Fire, not Mockingjay - Part 2). On a TV
-//   show a number is a season ("Skins (series 2)" is Skins). Known limit: an
+//   show a number or a season is a season of the show ("Skins (series 2)", "Squid Game (Season 2)" are the shows,
+//   not a making-of special); a title holding the name and the number also counts ("2 Fast 2 Furious"). Known limit: an
 //   unrelated title that reads as a sequel wins ("Alien (2)" is Alien 2: On Earth, a 1980 film, not Aliens). Kind words at the end of a note only say what it is ("(Raiders of the Lost Ark film)"). A title holding the
 //   name and the note that isn't taken is offered first under "Not it?", and otherwise only entries holding the
 //   name are offered ("Dune (Part Two)" isn't offered The Godfather Part II);
@@ -263,6 +264,9 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
   const numbers = titleWords.filter((w) => NUMBER.has(w));
   const anchor = named_ ? r!.pick : null;
   const show = (anchor ?? found[0])?.types.includes("urn:entity:tv_show");
+  // A season note on a show ("Stranger Things (Season 5)", "Squid Game (Season 2)") is the show: no companion or
+  // making-of title ("Stranger Things 5: Behind the Episode", "Squid Game: Making Season 2") is taken or offered first.
+  const season = show && numbers.length === 1 && titleWords.length === 1;
   if (numbers.length === 1 && titleWords.length === 1 && !show) {
     const n = NUMBER.get(numbers[0])! + 1;
     // The number a title gives itself right after the name ("Rocky III", "The Two Towers"), if any.
@@ -271,7 +275,12 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
       const w = rest?.find((x) => !PART.has(x) && !SMALL.has(x) && !LINKS.has(x));
       return w && NUMBER.has(w) ? w : null;
     };
-    const numbered = found.filter((e) => ownNumber(e) && sameWord(numbers[0], ownNumber(e)!));
+    // Or a title holding the name and the number, not after a part word ("2 Fast 2 Furious"; not "Mockingjay - Part 2").
+    const carries = (e: Entity) => {
+      const ws = words(e.name);
+      return !isArtist(e) && !startsWithName(e) && holdsName(e) && ws.some((w, i) => sameWord(numbers[0], w) && !(i > 0 && PART.has(ws[i - 1])));
+    };
+    const numbered = [...found.filter((e) => ownNumber(e) && sameWord(numbers[0], ownNumber(e)!)), ...found.filter(carries)];
     const hasNumber = (e: Entity) => words(e.name).some((w) => NUMBER.has(w));
     const top = found[0];
     const trusted = n > 1 && !!top && !isArtist(top) && top !== anchor && !hasNumber(top) && (anchor ? yearOf(top) > yearOf(anchor) : holdsName(top));
@@ -288,7 +297,7 @@ export function rankNames(found: Entity[], input: string): Ranked | null {
       return { pick, match: "closest", list: [pick, ...(byName?.list ?? []).filter((e) => e !== pick)], offered: (e) => !!byName?.offered(e) && holdsName(e), note: "title", searchName: !numbered.length && !anchor && !trusted };
     }
   }
-  const held = found.filter((e) => !isArtist(e) && holdsExactly(e, titleWords) && holdsExactly(e, named));
+  const held = season ? [] : found.filter((e) => !isArtist(e) && holdsExactly(e, titleWords) && holdsExactly(e, named));
   const titled = held.filter((e) => !named_ || (!fuller && (subtitle(e) || spinOff(e) || franchise(e))));
   if (titled.length) {
     // The title holding more of the note's words first, part words too ("Star Wars (Episode 1)" is Episode I, not

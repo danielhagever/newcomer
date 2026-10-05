@@ -211,6 +211,13 @@ export const T = [
   ["Die Hard (3)", "movie", title("Die Hard with a Vengeance")],
   ["Shrek (3)", "movie", title("Shrek the Third")],
   ["Toy Story (1)", "movie", at("toy story", "1995")],
+  // pass 16 (written before recording): season notes next to companion shows and making-of specials; 2 Fast 2 Furious
+  ["Stranger Things (Season 5)", "tv_show", only("Stranger Things")],
+  ["Stranger Things (5)", "tv_show", only("Stranger Things")],
+  ["Squid Game (Season 2)", "tv_show", only("Squid Game")],
+  ["The Office (Season 3)", "tv_show", at("the office", "2005")],
+  ["Breaking Bad (Season 5)", "tv_show", only("Breaking Bad")],
+  ["The Fast and the Furious (2)", "movie", title("2 Fast 2 Furious")],
   // one-word notes on shows (a show may be named "Us")
   ["Shameless (US)", "tv_show", at("shameless", "2011")],
   ["House of Cards (US)", "tv_show", at("house of cards", "2013")],
