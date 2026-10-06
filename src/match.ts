@@ -331,6 +331,7 @@ export async function matchNeighborhoods(
 
   let heat: Awaited<ReturnType<Qloo["heatmap"]>> = { points: [] };
   let cityMatches: Entity[] = [];
+  let kindsAnswered = false; // Qloo answered the search for your kinds of places (it may have found none)
   let around: Where = { query: center.query }; // where the city is: asked by name, or around its centre once that proved wrong
   let byName: Locality | undefined; // how Qloo read the city's name for the map
   if (mode === "map") {
@@ -377,11 +378,12 @@ export async function matchNeighborhoods(
         // "Moscow, Russia" is Trade Fair Moscow, with no coffee places; 25 km around the centre has 17). Nothing found
         // there is asked again around the centre; nothing found in a city read as itself stays nothing (live: 25 km
         // around Hoboken listed Astoria and Carroll Gardens).
-        if (!mine.length && "query" in around && namedInside(byName, center)) {
+        if (!mine.length && "query" in around && notTheCity(byName, center)) {
           trace.push({ step: "Check", detail: `Qloo found none of your kinds of places for "${center.query}" by its name; asked again for 25 km around the city centre` });
           mine = await q.places(placeSignals, { lat: center.lat, lon: center.lon, radiusM: 25000 }, 50, filterTags);
         }
         cityMatches = mine.filter((p) => p.lat !== undefined && p.lon !== undefined && visitable(p));
+        kindsAnswered = true;
       } catch {
         degraded = true;
       }
@@ -427,7 +429,7 @@ export async function matchNeighborhoods(
     // Nothing found where Qloo read the city as a place inside it is asked again around its centre too (live: "Moscow,
     // Russia" is Trade Fair Moscow: no coffee places there, 17 within 25 km of the centre); a city read as itself with
     // nothing found stays a 404 (25 km around Hoboken, with nothing in it, listed New York's neighborhoods, live).
-    if (part || offBy > 50 || (!found.length && "query" in around && namedInside(locality, center))) {
+    if (part || offBy > 50 || (!found.length && "query" in around && notTheCity(locality, center))) {
       const wrong = offBy > 50 ? `was ${Math.round(offBy)} km from the located city` : part ? `was only ${part}, a part of it` : `had none of these places${locality ? ` (read as ${locality.name.split(",")[0]})` : ""}`;
       trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" ${wrong}; asked again for 25 km around the city centre` });
       around = { lat: center.lat, lon: center.lon, radiusM: 25000 };
@@ -522,7 +524,9 @@ export async function matchNeighborhoods(
       }
     }
     trace.push({ step: "Your places", detail: `Qloo found ${cityMatches.length} ${cityMatches.length === 1 ? "place" : "places"} in the city that ${cityMatches.length === 1 ? "is" : "are"} one of your food or activity tastes; ${kept} ${kept === 1 ? "is" : "are"} in the neighborhoods shown` });
-  }
+  } else if (mode === "map" && kindsAnswered)
+    // Said, not dropped silently (live: Perth's coffee found nothing in the city's centre council).
+    trace.push({ step: "Your places", detail: `Qloo found no places in the city for ${resolved.filter((r) => r.placeTag).map((r) => r.as).join(", ")}; the areas come from the map alone` });
   const dropped = dedupeEvidence(hoods);
   if (dropped) trace.push({ step: "Filter", detail: `Left out ${dropped} ${dropped === 1 ? "place" : "places"} a newcomer can't visit (schools, offices, places of worship, stations, airports, studios, closed places and the like)` });
 
@@ -586,6 +590,16 @@ function namedInside(locality: Locality | undefined, center: { name: string }): 
   const [own, ...within] = (locality?.name ?? "").split(",").map((x) => nameKey(x));
   const city = nameKey(center.name.split(",")[0]);
   return own !== city && within.includes(city) ? locality!.name.split(",")[0].trim() : null;
+}
+
+// A locality named after the city that isn't the city itself: a place inside it (Trade Fair Moscow), the council of its
+// centre ("City of Perth, City of South Perth, ...", live), or a region named after it. A place search that finds
+// nothing there is asked again around the centre; a city read as itself (Hoboken) isn't. (A part of the city named
+// otherwise was already asked around its centre.) Its name, else null.
+function notTheCity(locality: Locality | undefined, center: { name: string }): string | null {
+  const own = nameKey((locality?.name ?? "").split(",")[0]);
+  const city = nameKey(center.name.split(",")[0]);
+  return own !== city && own.includes(city) ? locality!.name.split(",")[0].trim() : null;
 }
 
 function partOfCity(locality: Locality | undefined, center: { name: string }): string | null {

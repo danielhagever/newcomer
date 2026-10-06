@@ -903,9 +903,36 @@ test("a city read as itself with none of these places isn't widened into its nei
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
     assert.ok(!r.trace.some((t) => /none of your kinds of places/.test(t.detail)));
+    assert.ok(r.trace.some((t) => t.detail === "Qloo found no places in the city for Ramen; the areas come from the map alone"), "said, not dropped silently (live: Perth's coffee)");
     assert.ok(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags") && c.params.get("filter.location.radius") !== "1200").every((c) => !c.params.get("filter.location.radius")));
   } finally {
     m.restore();
+  }
+});
+
+test("a city read as its centre's council finds nothing by name and is asked again around its centre (live: Perth's coffee)", async () => {
+  // Qloo reads Perth as "City of Perth, City of South Perth, ...": named after the city, not the city.
+  const COUNCIL = { filter: [{ name: "City of Austin", disambiguation: "City of Austin, City of South Austin, Texas, United States", location: { lat: 30.27, lon: -97.74 } }] };
+  const ramen = place("a", "Ramen A", "Hyde Park", 30.3, -97.73, ["Ramen restaurant"], ["Evening"]);
+  const m = mockFetch((c) => (isPlaces(c) && c.params.get("filter.tags") ? { body: { results: { entities: c.params.get("filter.location.query") ? [] : [ramen] }, ...(c.params.get("filter.location.query") ? { query: { localities: COUNCIL } } : {}) } } : standardQloo()(c)));
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]);
+    assert.ok(r.neighborhoods.length);
+    assert.ok(r.trace.some((t) => t.detail.startsWith(`Qloo's area for "Austin, Texas" had none of these places (read as City of Austin); asked again`)), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
+  }
+  // With an artist, the map read as the council (live: Perth's, 92 cells) and your kinds of places asked again around it.
+  const map = mockFetch((c) =>
+    isPlaces(c) && c.params.get("filter.tags")
+      ? { body: { results: { entities: c.params.get("filter.location.query") ? [] : [ramen] } } }
+      : standardQloo({ heat: (h) => (h.params.get("filter.location.query") ? heatmap(AUSTIN.latitude, AUSTIN.longitude, 9, 8, COUNCIL.filter[0].disambiguation) : undefined) })(c),
+  );
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
+    assert.ok(r.trace.some((t) => t.detail === `Qloo found none of your kinds of places for "Austin, Texas" by its name; asked again for 25 km around the city centre`), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    map.restore();
   }
 });
 
@@ -915,6 +942,7 @@ test("Qloo's area far away is said by its distance, even when its description na
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
     assert.ok(r.trace.some((t) => /^Qloo's area for "Austin, Texas" was 1\d{3} km from the located city; asked again/.test(t.detail)), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(!r.trace.some((t) => t.step === "Your places"), "no food or activity tastes: nothing to say about them");
   } finally {
     m.restore();
   }
@@ -1033,7 +1061,12 @@ test("a picked Qloo ID is used as is: a cuisine filters places, an entity goes o
     const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [
       { name: "Dune", kind: "movie", id: UUID(2), as: "Dune (1984)" },
       { name: "ramen", kind: "tag", id: "urn:tag:cuisine:qloo:japanese_ramen", as: "Japanese Ramen" },
+      { name: "cool jazz", kind: "tag", id: "urn:tag:genre:music:cool_jazz" }, // a genre goes on the map; no name sent: its own
     ]);
+    assert.equal(m.calls.find(isHeat)!.params.get("signal.interests.tags"), "urn:tag:genre:music:cool_jazz");
+    assert.equal(r.resolved.find((x) => x.input === "cool jazz")!.as, "cool jazz");
+    assert.equal(r.resolved.find((x) => x.input === "ramen")!.as, "Japanese Ramen", "the name sent with a picked tag is kept");
+    assert.ok(r.trace.some((t) => t.step === "Your places"), "tags were asked for");
     assert.equal(m.calls.filter((c) => c.path === "/search" || c.params.get("filter.query")).length, 0, "no search by name");
     // Each picked ID is looked up once, so its own type decides how it is used.
     assert.deepEqual(m.calls.filter((c) => c.path === "/entities").map((c) => c.params.get("entity_ids")), [UUID(2)]);
@@ -1229,6 +1262,15 @@ test("when place calls fail the result is flagged degraded (shown, not cached) a
     assert.ok(r.weekend.every((d) => d.stops.length > 0));
   } finally {
     m.restore();
+  }
+  // A failed search for your kinds of places isn't reported as "found no places".
+  const k = mockFetch((c) => (isPlaces(c) && c.params.get("filter.tags") ? { status: 500, body: {} } : standardQloo()(c)));
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
+    assert.equal(r.degraded, true);
+    assert.ok(!r.trace.some((t) => /found no places in the city/.test(t.detail)));
+  } finally {
+    k.restore();
   }
 });
 

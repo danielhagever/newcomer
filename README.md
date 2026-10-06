@@ -19,7 +19,7 @@ Newcomer answers a personal question with evidence: **where in this city do the 
 5. **Plans a scouting weekend.** Saturday in the best match and Sunday in the runner-up: one place per part of the day, using Qloo's own time-of-day fit for each place.
 6. **Shows its work.** A "How we know" panel lists every Qloo call with its parameters (the key never leaves the server), status, result count and time, then Newcomer's own rules, then the limits of the result.
 
-With only food and activity tastes, there is nothing for Qloo's heatmap to use, so Newcomer ranks neighborhoods by where the matching places are, and says so. Qloo's city is checked as the map's is (only a part of the city, or over 50 km away, is asked again for 25 km around the centre, and so is a place search that finds nothing where Qloo read a place inside the city: "Moscow, Russia" is Trade Fair Moscow to Qloo; a city read as itself with nothing found says so rather than listing its neighbours), and a place over 40 km from the centre makes no area.
+With only food and activity tastes, there is nothing for Qloo's heatmap to use, so Newcomer ranks neighborhoods by where the matching places are, and says so. Qloo's city is checked as the map's is (only a part of the city, or over 50 km away, is asked again for 25 km around the centre, and so is a place search that finds nothing where Qloo read the city as something named after it: "Moscow, Russia" is Trade Fair Moscow to Qloo, "Perth, Australia" the City of Perth council; a city read as itself with nothing found says so rather than listing its neighbours), and a place over 40 km from the centre makes no area.
 
 It works as a web app and as an **MCP tool** (`find_neighborhoods`) that an agent can call (see below).
 
@@ -103,7 +103,7 @@ You need Node.js 22 or newer and a free Cloudflare account (Workers, KV and Work
 ```bash
 git clone https://github.com/danielhagever/newcomer && cd newcomer
 npm install
-npm test                                          # 120 tests against a mock Qloo shaped like the live API, no key needed
+npm test                                          # 121 tests against a mock Qloo shaped like the live API, no key needed
 npx wrangler login
 npx wrangler kv namespace create newcomer-cache   # put the id in wrangler.jsonc
 npx wrangler secret put QLOO_API_KEY             # your hackathon key, server-side only

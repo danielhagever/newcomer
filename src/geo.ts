@@ -198,7 +198,8 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   // country code; a state wins over a country code ("Richmond, CA" is California, not Canada).
   const byName = (r: any, part: string) => {
     const own = [r.admin1, r.country].filter(Boolean).map(fold);
-    return regionNames(part).some((n) => own.some((v) => v === n || (n.length > 3 && v.includes(n)))) || COUNTRY_WORDS[part] === fold(r.country_code);
+    // Whole words only: "India" is in "Republic of India", not in "Indiana" (live: "Calcutta, India" was Calcutta, Indiana).
+    return regionNames(part).some((n) => own.some((v) => v === n || (n.length > 3 && ` ${v} `.includes(` ${n} `)))) || COUNTRY_WORDS[part] === fold(r.country_code);
   };
   const byCode = (r: any, part: string) => byName(r, part) || (part.length === 2 && part === fold(r.country_code));
   // French saints are filed with hyphens ("Saint-Étienne", "Saint-Malo"): asked for only when no spelling found

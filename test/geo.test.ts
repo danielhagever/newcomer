@@ -61,7 +61,7 @@ test("a city typed as one of Object's own names ('constructor', '__proto__') is 
 test("100 places are asked for only when what follows the comma fits none of the first 10, and only places of that exact name are added", async () => {
   // Live: Newport, Rhode Island; Salem, Massachusetts; Jackson, Wyoming are past Open-Meteo's first 10 of their names.
   const R = (name: string, admin1: string, population: number, latitude: number) => ({ name, admin1, country: "United States", country_code: "US", population, feature_code: "PPL", latitude, longitude: -71 });
-  const TEN = [R("Testville", "Ohio", 1000, 40)];
+  const TEN = [R("Testville", "Ohio", 1000, 40), R("Testville", "Indiana", 500, 39)];
   const HUNDRED = [...TEN, R("Testville Heights", "Rhode Island", 50000, 41.5), R("Testville", "Rhode Island", 20000, 41.6), R("Testville", "Kansas", 90000, 38)];
   const original = globalThis.fetch;
   const counts: string[] = [];
@@ -77,6 +77,9 @@ test("100 places are asked for only when what follows the comma fits none of the
     const nowhere = await cityCenter(memoryKV().kv, new Budget(48), "Testville, Nowhere");
     assert.equal(nowhere?.lat, 40, "nothing fits Nowhere among 100 either: the first 10's answer, flagged");
     assert.equal(nowhere?.unmatched, "Nowhere");
+    // Whole words only: "India" isn't Indiana (live: "Calcutta, India" was Calcutta, Indiana, unflagged).
+    const india = await cityCenter(memoryKV().kv, new Budget(48), "Testville, India");
+    assert.equal(india?.unmatched, "India");
     counts.length = 0;
     await cityCenter(memoryKV().kv, new Budget(48), "Testville, Ohio");
     assert.deepEqual(counts, ["10"], "a region that fits is asked once");

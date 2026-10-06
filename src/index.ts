@@ -27,7 +27,7 @@ const failure = (e: unknown) => {
 };
 
 // Bump whenever the pipeline or the result format changes, so no one gets yesterday's logic.
-const CACHE_VERSION = 58;
+const CACHE_VERSION = 59;
 
 // The saved answer's key. Names keep their letter case: the name matching reads it, and 13 of 523 recorded names
 // change answer by case (live: "ncis (la)" is NCIS, "NCIS (LA)" NCIS: Los Angeles), so the first spelling searched
