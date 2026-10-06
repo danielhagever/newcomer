@@ -368,12 +368,15 @@ export async function matchNeighborhoods(
         : "Qloo's taste map was empty for these signals, so the areas come from the places that match your food and activity tastes instead",
     });
     let { places: found, locality } = await q.placesIn(placeSignals, around, 50, filterTags);
+    qlooCity = locality?.name; // the city as Qloo read it, as the map's is (it says the country)
     const part = partOfCity(locality, center);
     if (part) {
       trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" was only ${part}, a part of it; asked again for 25 km around the city centre` });
       around = { lat: center.lat, lon: center.lon, radiusM: 25000 };
       found = await q.places(placeSignals, around, 50, filterTags);
     }
+    // Qloo can know a taste and have no places for it in the city (live: "oysters" in Boston): say so, not "try again".
+    if (!found.length) throw new AppError(`Qloo has no places in ${center.name} for ${resolved.filter((r) => r.placeTag).map((r) => r.as).join(", ") || "these tastes"}. Try a nearby city or another taste.`, 404);
     hoods = rankByPlaces(found, center);
     trace.push({ step: "Areas", detail: `Qloo found ${found.length} places that match your food and activity tastes; grouped them by Qloo neighborhood` });
   }
@@ -424,7 +427,8 @@ export async function matchNeighborhoods(
     const inside = [...h.evidence, ...h.matches].filter((e) => inSquare(h, e));
     h.name = atCentre(h, inside) ? centreName : byPlaces(inside);
   }
-  for (const h of hoods) h.name = says(h.name) ? clean(h.name) : "";
+  // An area Qloo grouped under the city's own name at its centre is the city centre too (places mode: Melbourne's CBD).
+  for (const h of hoods) h.name = says(h.name) ? clean(h.name) : h.name && cityWords.has(nameKey(clean(h.name))) && km(h, center) <= 1.5 ? centreName : "";
   const unnamed = hoods.filter((h) => !h.name);
   if (unnamed.length) {
     const r = await namesFor(env.CACHE, budget, center.name, unnamed, 3);
@@ -457,7 +461,7 @@ export async function matchNeighborhoods(
     trace.push({ step: "Your places", detail: `Qloo found ${cityMatches.length} places in the city that are one of your food or activity tastes; ${kept} are in the neighborhoods shown` });
   }
   const dropped = dedupeEvidence(hoods);
-  if (dropped) trace.push({ step: "Filter", detail: `Left out ${dropped} ${dropped === 1 ? "place" : "places"} a newcomer can't visit (schools, offices, places of worship, stations, airports, studios and the like)` });
+  if (dropped) trace.push({ step: "Filter", detail: `Left out ${dropped} ${dropped === 1 ? "place" : "places"} a newcomer can't visit (schools, offices, places of worship, stations, airports, studios, closed places and the like)` });
 
   // 6. A weekend to test the move before signing a lease: one place per part of the day, from
   // Qloo's time-of-day fit for each place.
@@ -581,15 +585,21 @@ const nameKey = (s: string) => normalizeName(s).replace(/^the\s+/, "");
 // A place's name as spelled loosely: case, "&" for "and" and punctuation aside.
 const placeKey = (s: string) => nameKey(s.replace(/&/g, " and ").replace(/[^\p{L}\p{N}]+/gu, " ").trim());
 // The same place under two records: the same name spelled loosely, or one name holding the other's words at the same
-// spot (within 30 m) with a category in common ("The Top CN Tower" and "CN Tower", 1 m apart, live; not "360 The
-// Restaurant at the CN Tower", a restaurant there).
+// spot (within 5 m) with a category in common ("The Top CN Tower" and "CN Tower", 1.4 m apart, live; not "360 The
+// Restaurant at the CN Tower", a restaurant there, nor two rooms or shops of one building: ACL Live and its 3TEN room,
+// 19 m apart, Tokyo Ramen Street and a shop in it, 29 m).
 export const samePlace = (a: Entity, b: Entity) => {
   if (placeKey(a.name) === placeKey(b.name)) return true;
-  if (a.lat === undefined || a.lon === undefined || b.lat === undefined || b.lon === undefined || km({ lat: a.lat, lon: a.lon }, { lat: b.lat, lon: b.lon }) > 0.03) return false;
+  if (a.lat === undefined || a.lon === undefined || b.lat === undefined || b.lon === undefined || km({ lat: a.lat, lon: a.lon }, { lat: b.lat, lon: b.lon }) > 0.005) return false;
   const [x, y] = [placeKey(a.name).split(" "), placeKey(b.name).split(" ")];
   const holds = x.every((w) => y.includes(w)) || y.every((w) => x.includes(w));
   return holds && (a.tags ?? []).some((t) => t !== "Tourist attraction" && (b.tags ?? []).includes(t));
 };
+// Two branches of one chain: the same first two words (small words aside) and a category in common ("Merlo Coffee Cafe
+// QUT Gardens Point" and "Merlo Coffee Cafe | UQ Saint Lucia Campus", Brisbane, live; not "Golden Gate Park" and
+// "Golden Gate Bridge", nor two museums of something).
+const brand = (s: string) => placeKey(s).split(" ").filter((w) => !["the", "of", "and", "a", "an", "at"].includes(w)).slice(0, 2).join(" ");
+const sameChain = (a: Entity, b: Entity) => brand(a.name) === brand(b.name) && (a.tags ?? []).some((t) => t !== "Tourist attraction" && (b.tags ?? []).includes(t));
 
 function mostCommon(xs: string[]): string | undefined {
   const c = new Map<string, number>();
@@ -645,7 +655,7 @@ function dedupeEvidence(hoods: Neighborhood[]): number {
 }
 
 // Judged on Qloo's categories only: a venue's name ("The Garage", "Temple Bar") says nothing.
-const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|municipal|department of|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office|business center|senior citizen|(subway|train|railway|metro|bus|transit|light rail|tram) station|ferry terminal|airport(?=$| \|)|military|law library|academic department|research institute|radio broadcaster|movie studio)\b/i;
+const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|municipal|department of|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office|business center|senior citizen|(subway|train|railway|metro|bus|transit|light rail|tram) station|ferry terminal|airport(?=$| \|)|military|law library|photography studio|water treatment|academic department|research institute|radio broadcaster|movie studio)\b/i;
 const visitable = (e: Entity) => !e.closed && !NOT_VISITABLE.test((e.tags ?? []).join(" | "));
 
 async function inBatches<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {
@@ -677,7 +687,7 @@ export function planDay(places: Entity[]): { when: string; place: string; why: s
   const stops: { when: string; place: string; why: string }[] = [];
   for (const [slotName, fits] of SLOTS) {
     const p = places.find(
-      (e) => weekendStop(e) && !used.some((u) => u.id === e.id || samePlace(u, e)) && ((e.times ?? []).some((t) => fits.includes(t)) || (slotName === "Afternoon" && !(e.times ?? []).length)),
+      (e) => weekendStop(e) && !used.some((u) => u.id === e.id || samePlace(u, e) || sameChain(u, e)) && ((e.times ?? []).some((t) => fits.includes(t)) || (slotName === "Afternoon" && !(e.times ?? []).length)),
     );
     if (!p) continue;
     used.push(p);

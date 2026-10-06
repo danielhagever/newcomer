@@ -342,6 +342,8 @@ test("an area is named by the places inside its own square, else OpenStreetMap, 
   assert.equal(await run({ inside: ["Austin", "Austin", "Austin", "Hyde Park"], locality: "Austin, Travis County, Texas, Australia" }), "Austin city centre");
   assert.equal(await run({ inside: ["Austin", "Austin", "Austin", "Hyde Park"], far: true }), "Hyde Park");
   assert.equal(await run({ inside: ["Hyde Park", "Hyde Park", "Austin"] }), "Hyde Park");
+  assert.equal(await run({ inside: ["Austin", "Austin", "Austin", "Hyde Park"], locality: "Montreal, Island of Montreal, Quebec, Canada" }), "Downtown Austin"); // Canada too
+  assert.equal(await run({ inside: ["Austin", "Austin", "Austin", "Hyde Park", "Hyde Park"], insideIs: "Courthouse" }), "Rosslyn"); // places no one visits don't vote
   // OpenStreetMap's spot itself: a neighbourhood is a name (Missoula's "Lower Rattlesnake", live); another kind of spot
   // is not, and a street comes from its street ("around Fair Way", not the fair office's own name).
   assert.equal(await run({ osm: { osm_key: "place", osm_value: "neighbourhood", name: "Lower Rattlesnake" } }), "Lower Rattlesnake");
@@ -394,6 +396,23 @@ test("one place under two records at one spot is one place, not a restaurant the
   assert.ok(!samePlace(top, elsewhere), "the same words far apart are two places");
   assert.ok(!samePlace(top, { ...tower, tags: ["Tourist attraction", "Communications tower"] }), "a tourist attraction alone is no shared category");
   assert.ok(!samePlace(e("a", "Ramen Nagi", 43.6, -79.4, ["Restaurant", "Ramen"], []), e("b", "Tacos Chiwas", 43.6, -79.4, ["Restaurant", "Mexican"], [])), "two restaurants of one food hall are two places");
+  assert.ok(samePlace(tower, top), "either name may hold the other");
+  // Two rooms or shops of one building (live): ACL Live and its 3TEN room 19 m apart, Tokyo Ramen Street and a shop in it 29 m.
+  assert.ok(!samePlace(e("acl", "Austin City Limits Live (ACL Live & 3TEN ACL Live)", 30.2652627, -97.7469912, ["Tourist attraction", "Event venue", "Live music venue"], []), e("3ten", "3Ten Austin City Limits", 30.2652971, -97.7471929, ["Live music venue", "Tourist attraction"], [])));
+  assert.ok(!samePlace(e("trs", "Tokyo Ramen Street", 35.6802935, 139.7679568, ["Restaurant", "Ramen restaurant", "Food court", "Tsukemen"], []), e("rok", "Rokurinsha Tokyo Ramen Street", 35.6800519, 139.7678455, ["Chinese", "Noodle shop", "Japanese", "Restaurant"], [])));
+  // Two branches of one chain aren't two stops of one day (Brisbane, live); two landmarks sharing a first word are.
+  const qut = e("qut", "Merlo Coffee Cafe QUT Gardens Point", -27.4771547, 153.0285813, ["Coffee shop", "Coffee store", "Breakfast restaurant", "Breakfast"], ["Morning"]);
+  const uq = e("uq", "Merlo Coffee Cafe | UQ Saint Lucia Campus", -27.4965918, 153.0143439, ["Restaurant supply store", "Restaurant", "Breakfast restaurant", "Seafood"], ["Afternoon"]);
+  assert.deepEqual(planDay([qut, uq] as any).map((s) => s.place), ["Merlo Coffee Cafe QUT Gardens Point"]);
+  const park = e("park", "Golden Gate Park", 37.769, -122.483, ["Park", "Tourist attraction"], ["Morning"]);
+  const bridge = e("bridge", "Golden Gate Bridge", 37.819, -122.478, ["Bridge", "Tourist attraction"], ["Afternoon"]);
+  assert.equal(planDay([park, bridge] as any).length, 2);
+  const moma = e("moma", "Museum of Modern Art", 40.761, -73.977, ["Art museum", "Museum"], ["Morning"]);
+  const amnh = e("amnh", "Museum of Natural History", 40.781, -73.974, ["History museum", "Museum"], ["Afternoon"]);
+  assert.equal(planDay([moma, amnh] as any).length, 2, "small words aside: two museums, not a chain");
+  const philz1 = e("p1", "Philz Coffee Mission", 37.75, -122.42, ["Coffee shop"], ["Morning"]);
+  const philz2 = e("p2", "Philz Coffee Castro", 37.76, -122.43, ["Coffee shop"], ["Afternoon"]);
+  assert.equal(planDay([philz1, philz2] as any).length, 1);
   assert.deepEqual(planDay([top, tower, restaurant] as any).map((s) => s.place), ["The Top CN Tower", "360 The Restaurant at the CN Tower"]);
   // A wedding venue that is also a gallery or a garden is a stop (Denver Botanic Gardens, live); a wedding venue alone isn't.
   const gardens = e("dbg", "Denver Botanic Gardens", 39.7321, -104.96128, ["Tourist attraction", "Art gallery", "Wedding venue", "Botanical garden"], ["Afternoon"]);
@@ -625,6 +644,49 @@ test("with only food and activity tastes, a part of the city is asked again arou
     const cityWide = m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags"));
     assert.deepEqual(cityWide.map((c) => !!c.params.get("filter.location.radius")), [false, true]);
     assert.ok(r.trace.some((t) => /was only Hyde Park, a part of it/.test(t.detail)));
+  } finally {
+    m.restore();
+  }
+});
+
+test("with only food and activity tastes, places filed under the city's own name at its centre are the city centre (Melbourne, live)", async () => {
+  const m = mockFetch((c) =>
+    isPlaces(c) && c.params.get("filter.tags")
+      ? { body: { results: { entities: [
+          place("a", "Dumplings A", "Austin", AUSTIN.latitude, AUSTIN.longitude, ["Dumpling restaurant"], ["Evening"]),
+          place("b", "Dumplings B", "Austin", AUSTIN.latitude + 0.001, AUSTIN.longitude, ["Dumpling restaurant"], ["Midday"]),
+          place("c", "Dumplings C", "Hyde Park", AUSTIN.latitude + 0.05, AUSTIN.longitude, ["Dumpling restaurant"], ["Midday"]),
+        ] }, query: { localities: { filter: [{ name: "Austin", disambiguation: "Austin, Travis County, Texas, United States", location: { lat: AUSTIN.latitude, lon: AUSTIN.longitude } }] } } } }
+      : standardQloo()(c),
+  );
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]);
+    assert.equal(r.mode, "places");
+    assert.ok(r.neighborhoods.some((h) => h.name === "Downtown Austin"), JSON.stringify(r.neighborhoods.map((h) => h.name)));
+  } finally {
+    m.restore();
+  }
+  // Filed under the city's name away from its centre: not the city centre (OpenStreetMap names it).
+  const far = mockFetch((c) =>
+    isPlaces(c) && c.params.get("filter.tags")
+      ? { body: { results: { entities: [
+          place("a", "Dumplings A", "Austin", AUSTIN.latitude + 0.05, AUSTIN.longitude, ["Dumpling restaurant"], ["Evening"]),
+          place("b", "Dumplings B", "Austin", AUSTIN.latitude + 0.051, AUSTIN.longitude, ["Dumpling restaurant"], ["Midday"]),
+        ] }, query: { localities: { filter: [{ name: "Austin", disambiguation: "Austin, Travis County, Texas, United States", location: { lat: AUSTIN.latitude, lon: AUSTIN.longitude } }] } } } }
+      : standardQloo()(c),
+  );
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]);
+    assert.ok(r.neighborhoods.length && r.neighborhoods.every((h) => h.name !== "Downtown Austin"), JSON.stringify(r.neighborhoods.map((h) => h.name)));
+  } finally {
+    far.restore();
+  }
+});
+
+test("a food or activity taste with no places in the city says so, not \"try again later\" (Boston oysters, live)", async () => {
+  const m = mockFetch((c) => (isPlaces(c) && c.params.get("filter.tags") ? { body: { results: { entities: [] } } } : standardQloo()(c)));
+  try {
+    await assert.rejects(matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]), (e: AppError) => e.status === 404 && /Qloo has no places in Austin, Texas for Ramen/.test(e.message) && !/try again later/i.test(e.message));
   } finally {
     m.restore();
   }
@@ -971,6 +1033,14 @@ test("can't-visit places are judged by Qloo's categories, not names, and filtere
     place("s15", "Tacos (Permanently Closed)", "Downtown", 30.27, -97.74, ["Taco restaurant"], ["Evening"]),
     place("v6", "Closed Sessions Bar", "Downtown", 30.27, -97.74, ["Cocktail bar"], ["Evening"]), // open: its name only starts with the word
     place("s16", "Closed - Old Taqueria", "Downtown", 30.27, -97.74, ["Taco restaurant"], ["Evening"]),
+    place("s17", "CLOSED Tacos Uno", "Downtown", 30.27, -97.74, ["Taco restaurant"], ["Evening"]),
+    place("s18", "Closed \u2013 Tacos Dos", "Downtown", 30.27, -97.74, ["Taco restaurant"], ["Evening"]),
+    place("s19", "Closed \u2014 Tacos Tres", "Downtown", 30.27, -97.74, ["Taco restaurant"], ["Evening"]),
+    place("s20", "Closed: Tacos Cuatro", "Downtown", 30.27, -97.74, ["Taco restaurant"], ["Evening"]),
+    place("s21", "Closed | Tacos Cinco", "Downtown", 30.27, -97.74, ["Taco restaurant"], ["Evening"]),
+    // Live: a wastewater plant (Brooklyn) and photographers' studios (Atlanta) as Sunday stops.
+    place("s22", "Newtown Creek Wastewater Treatment Plant", "Downtown", 30.27, -97.74, ["Water treatment plant"], ["Morning"]),
+    place("s23", "Cam Kirk Studios", "Downtown", 30.27, -97.74, ["Photography studio"], ["Afternoon"]),
     place("v1", "The Garage", "Downtown", 30.27, -97.74, ["Cocktail bar"], ["Evening"]),
     place("v2", "Temple Bar", "Downtown", 30.27, -97.74, ["Pub"], ["Evening"]),
     place("v3", "Bank & Bourbon", "Downtown", 30.27, -97.74, ["Restaurant"], ["Evening"]),
@@ -986,7 +1056,7 @@ test("can't-visit places are judged by Qloo's categories, not names, and filtere
     assert.equal(listed.length, 5);
     assert.ok(listed.every((n) => ["Bank & Bourbon", "Cafe One", "Closed Sessions Bar", "Gallery Two", "Temple Bar", "The Garage"].includes(n)), JSON.stringify(listed));
     assert.ok(listed.includes("Closed Sessions Bar"), "a bar whose name only starts with \"Closed\" is open");
-    assert.ok(r.trace.some((t) => t.step === "Filter" && /Left out 16 places/.test(t.detail)));
+    assert.ok(r.trace.some((t) => t.step === "Filter" && /Left out 23 places/.test(t.detail)));
   } finally {
     m.restore();
   }

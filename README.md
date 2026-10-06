@@ -88,7 +88,7 @@ A real run on 2026-10-03 (no personal data; the key is not shown anywhere).
 - No personal data is sent to Qloo: only public cultural signals (names of artists, shows, cuisines) and a city.
 - Food and activity tastes pick places but don't shape Qloo's heatmap; with only those, neighborhoods are ranked by matching places, which is thinner evidence.
 - A word that isn't an exact Qloo name is only used if it resembles what was typed (allowing a typo or two); anything else is reported as not found, because Qloo's semantic search returns something for any text.
-- Neighborhood names are Qloo's (from its place data), with OpenStreetMap where Qloo has none; they may differ from local usage, Qloo sometimes uses a district name ("Near North Side") next to the neighborhoods inside it, a landmark can carry the other side's name (Qloo files the Brooklyn Bridge under Manhattan's Two Bridges, so the Dumbo square is called that), and OpenStreetMap's district can be off (in Nashville its "East Nashville" district covers Broadway downtown).
+- Neighborhood names are Qloo's (from its place data), with OpenStreetMap where Qloo has none; they may differ from local usage, Qloo sometimes uses a district name ("Near North Side") next to the neighborhoods inside it, a landmark can carry the other side's name (Qloo files the Brooklyn Bridge under Manhattan's Two Bridges and the Dumbo ferry under Whitehall, so the Dumbo square takes one of those names), and OpenStreetMap's district can be off (in Nashville its "East Nashville" district covers Broadway downtown).
 - The area squares, their ranking (including the small boost for your kinds of places), the left-out place types and the weekend picks are Newcomer's rules on top of Qloo's numbers; the page labels them.
 - Results are cached for a day per identical query to respect the event quota. A result where an optional step failed is shown but not cached.
 - Each address can run 20 new searches an hour, to protect the shared quota; asking again for an answer saved today doesn't count, unless the search is sent as free text, which the AI model reads again each time.
@@ -102,7 +102,7 @@ You need Node.js 22 or newer and a free Cloudflare account (Workers, KV and Work
 ```bash
 git clone https://github.com/danielhagever/newcomer && cd newcomer
 npm install
-npm test                                          # 98 tests against a mock Qloo shaped like the live API, no key needed
+npm test                                          # 100 tests against a mock Qloo shaped like the live API, no key needed
 npx wrangler login
 npx wrangler kv namespace create newcomer-cache   # put the id in wrangler.jsonc
 npx wrangler secret put QLOO_API_KEY             # your hackathon key, server-side only

@@ -221,6 +221,8 @@ test("the one-line answer agrees in number: one runner-up comes next, two come n
   // A name ending in a period ends the sentence once (Toronto, live: "think The Top CN Tower and Dineen Coffee Co..").
   const toronto = { city: "Toronto, Ontario", neighborhoods: [{ ...hood("Harbourfront"), evidence: [{ id: "a", name: "The Top CN Tower", tags: ["Observation deck"] }, { id: "b", name: "Dineen Coffee Co.", tags: ["Coffee shop", "Cafe"] }] }, hood("Wellington Place")] } as any;
   assert.match(summary(toronto), /think The Top CN Tower and Dineen Coffee Co\. Wellington Place comes next\.$/);
+  const london = { city: "London, United Kingdom", neighborhoods: [{ ...hood("Battersea"), evidence: [{ id: "a", name: "Feed the Yak Elephant Park!", tags: ["Restaurant"] }] }] } as any;
+  assert.match(summary(london), /think Feed the Yak Elephant Park!$/); // "!" or "?" ends it too
 });
 
 test("a failed search says Stopped, not Done", () => {
