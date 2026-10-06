@@ -51,7 +51,7 @@ export function heatmap(lat: number, lon: number, groups = 9, per = 8, locality 
       query: { affinity: 1 - i / (n - 1), affinity_rank: 1 - i / n, popularity: 0.5 },
     };
   });
-  return { success: true, results: { heatmap: cells }, query: { localities: { filter: [{ name: "Austin", disambiguation: locality, location: { lat, lon } }] } } };
+  return { success: true, results: { heatmap: cells }, query: { localities: { filter: [{ name: locality.split(",")[0], disambiguation: locality, location: { lat, lon } }] } } };
 }
 
 export function place(id: string, name: string, hood: string | null, lat: number, lon: number, categories: string[], times: string[]) {

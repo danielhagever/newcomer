@@ -28,6 +28,7 @@ export interface Entity {
   popularity?: number;
   tags?: string[]; // a place's categories (Barbecue restaurant, Cocktail bar)
   times?: string[]; // Qloo's time-of-day fit for a place (Morning, Midday, Evening...)
+  closed?: boolean; // Qloo says the place is closed, or its name does ("CLOSED - Tacos el Cabron": is_closed false, live)
 }
 
 export interface Tag {
@@ -220,7 +221,11 @@ export class Qloo {
 function localityOf(body: any): Locality | undefined {
   const l = body?.query?.localities?.filter?.[0];
   const lat = num(l?.location?.lat), lon = num(l?.location?.lon);
-  return l && Number.isFinite(lat) && Number.isFinite(lon) ? { name: String(l.disambiguation ?? l.name ?? ""), lat, lon } : undefined;
+  // The disambiguation usually starts with the locality's own name ("Minato, Tokyo, ..."), but not always: Montreal's
+  // is "Island of Montreal" with the disambiguation "Canada" (live), which read as "Qloo used Canada".
+  const own = String(l?.name ?? "").trim(), d = String(l?.disambiguation ?? "").trim();
+  const name = !d ? own : !own || d.toLowerCase().startsWith(own.toLowerCase()) ? d : `${own}, ${d}`;
+  return l && Number.isFinite(lat) && Number.isFinite(lon) ? { name, lat, lon } : undefined;
 }
 
 export interface Locality {
@@ -277,7 +282,10 @@ function toEntity(e: any): Entity {
     neighborhood: typeof e.properties?.neighborhood === "string" && e.properties.neighborhood.trim() ? e.properties.neighborhood.trim() : undefined,
     tags: [...new Set(tags.filter((t) => CATEGORY.has(t.type) && t.name !== "Place").map((t) => t.name))].slice(0, 4),
     times: [...new Set(tags.filter((t) => t.type === "urn:tag:time_of_day_fit:qloo").map((t) => t.name))],
+    ...(e.properties?.is_closed === true || closedName(String(e.name ?? "")) ? { closed: true } : {}),
   };
 }
 
+// "CLOSED - Tacos el Cabron", "Tacos (Permanently Closed)"; not a bar named "Closed Sessions".
+const closedName = (n: string) => /^\W*CLOSED\b/.test(n) || /^\W*(permanently\s+)?closed\s*[-\u2013\u2014:|]|\((permanently\s+)?closed\)\s*$/i.test(n);
 const CATEGORY = new Set(["urn:tag:category:place", "urn:tag:genre:place", "urn:tag:cuisine:qloo"]);

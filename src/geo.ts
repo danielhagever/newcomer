@@ -293,7 +293,7 @@ export async function namesFor(
   cells: { lat: number; lon: number }[],
   reserve: number,
 ): Promise<{ names: Map<string, string[]>; missing: number; failed: number }> {
-  const key = `names2:${cityKey.toLowerCase()}`; // names2: each cell keeps every name OpenStreetMap gives it
+  const key = `names3:${cityKey.toLowerCase()}`; // names3: every name OpenStreetMap gives a cell, spots read as of 2026-10-06
   const known: Record<string, string[]> = (await kvGet(cache, budget, key)) ?? {};
   const want = [...new Set(cells.map((c) => cellKey(c.lat, c.lon)))].filter((k) => !(k in known));
   const fresh: Record<string, string[]> = {};
