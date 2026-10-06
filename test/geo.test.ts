@@ -1,4 +1,4 @@
-// City lookup against 426 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 432 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL"
@@ -17,7 +17,7 @@ const FIX: Record<string, unknown[]> = Object.fromEntries(
 );
 const CASES: [string, string, string | null][] = JSON.parse(readFileSync(new URL("./geo-cases.json", import.meta.url), "utf8"));
 
-test("city lookup: 426 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 432 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -43,7 +43,7 @@ test("city lookup: 426 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 426);
+  assert.equal(CASES.length, 432);
   assert.deepEqual(wrong, []);
 });
 
@@ -53,6 +53,33 @@ test("a city typed as one of Object's own names ('constructor', '__proto__') is 
   try {
     for (const city of ["Constructor", "__proto__", "Austin, __proto__", "__proto__, Texas", "St constructor, constructor", "constructor, us", "toString, valueOf"])
       assert.equal(await cityCenter(memoryKV().kv, new Budget(48), city), null, city);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("100 places are asked for only when what follows the comma fits none of the first 10, and only places of that exact name are added", async () => {
+  // Live: Newport, Rhode Island; Salem, Massachusetts; Jackson, Wyoming are past Open-Meteo's first 10 of their names.
+  const R = (name: string, admin1: string, population: number, latitude: number) => ({ name, admin1, country: "United States", country_code: "US", population, feature_code: "PPL", latitude, longitude: -71 });
+  const TEN = [R("Testville", "Ohio", 1000, 40)];
+  const HUNDRED = [...TEN, R("Testville Heights", "Rhode Island", 50000, 41.5), R("Testville", "Rhode Island", 20000, 41.6), R("Testville", "Kansas", 90000, 38)];
+  const original = globalThis.fetch;
+  const counts: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    counts.push(u.searchParams.get("count")!);
+    return new Response(JSON.stringify({ results: u.searchParams.get("count") === "100" ? HUNDRED : TEN }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const ri = await cityCenter(memoryKV().kv, new Budget(48), "Testville, Rhode Island");
+    assert.equal(ri?.lat, 41.6, "Testville itself, not the bigger Testville Heights");
+    assert.equal(ri?.unmatched, undefined);
+    const nowhere = await cityCenter(memoryKV().kv, new Budget(48), "Testville, Nowhere");
+    assert.equal(nowhere?.lat, 40, "nothing fits Nowhere among 100 either: the first 10's answer, flagged");
+    assert.equal(nowhere?.unmatched, "Nowhere");
+    counts.length = 0;
+    await cityCenter(memoryKV().kv, new Budget(48), "Testville, Ohio");
+    assert.deepEqual(counts, ["10"], "a region that fits is asked once");
   } finally {
     globalThis.fetch = original;
   }

@@ -13,7 +13,7 @@ const isHeat = (c: Call) => qloo(c) && c.params.get("filter.type") === "urn:heat
 const isPlaces = (c: Call) => qloo(c) && c.params.get("filter.type") === "urn:entity:place";
 const PLACE = "urn:entity:place";
 
-// Records by ID, as GET /entities and /v2/tags?filter.results.tags answer for a picked ID (an unknown ID is left out).
+// Records by ID, as GET /entities answers for a picked ID (an unknown ID is left out).
 const BY_ID = [
   { entity_id: UUID(1), name: "Dune", disambiguation: "2021", types: ["urn:entity:movie"] },
   { entity_id: UUID(2), name: "Dune", disambiguation: "1984", types: ["urn:entity:movie"] },
@@ -21,11 +21,6 @@ const BY_ID = [
   { entity_id: UUID(6), name: "Fauda", disambiguation: "2015", types: ["urn:entity:tv_show"] },
   { entity_id: UUID(7), name: "Joe's Pizza", disambiguation: "216 Bedford Ave Brooklyn, NY 11249", types: [PLACE] },
   { entity_id: UUID(8), name: "Blue Note", types: ["urn:entity:artist"] },
-];
-const TAGS_BY_ID = [
-  tag("urn:tag:cuisine:qloo:japanese_ramen", "Japanese Ramen", [PLACE]),
-  tag("urn:tag:good_for:qloo:natural_wine_bar", "Natural Wine Bar", [PLACE]),
-  tag("urn:tag:genre:qloo:jazz", "Jazz", ["urn:entity:artist", "urn:entity:movie"]),
 ];
 
 // A Qloo that knows a few things the way the live one answers them.
@@ -49,10 +44,6 @@ function standardQloo(opts: { heat?: (c: Call) => unknown; hood?: (c: Call) => s
       // Live: an ID that isn't a valid UUID is a 400 ("entity_ids should be an array of valid UUIDs").
       if (ids.some((id) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))) return { status: 400, body: { errors: [{ message: "entity_ids:  entity_ids should be an array of valid UUIDs" }] } };
       return { body: { results: BY_ID.filter((e) => ids.includes(e.entity_id)) } };
-    }
-    if (c.path === "/v2/tags" && c.params.get("filter.results.tags")) {
-      const ids = c.params.get("filter.results.tags")!.split(",");
-      return { body: { results: { tags: TAGS_BY_ID.filter((t) => ids.includes(t.id)) } } };
     }
     if (c.path === "/v2/tags") {
       const q = c.params.get("filter.query")!;
@@ -818,7 +809,8 @@ test("with only food and activity tastes, a city Qloo reads over 50 km away is a
 test("a place search that finds nothing by the city's name is asked again around its centre (live: Moscow read as Trade Fair Moscow)", async () => {
   const FAIR = { filter: [{ name: "Trade Fair Austin, All-Texas Exhibition Centre", disambiguation: "Trade Fair Austin, All-Texas Exhibition Centre, Austin, Texas, United States", location: { lat: 30.33, lon: -97.7 } }] };
   const ramen = place("a", "Ramen A", "Downtown", 30.27, -97.74, ["Ramen restaurant"], ["Evening"]);
-  const fair = (c: Call) => (isPlaces(c) && c.params.get("filter.tags") ? { body: { results: { entities: c.params.get("filter.location.query") ? [] : [ramen] }, ...(c.params.get("filter.location.query") ? { query: { localities: FAIR } } : {}) } } : standardQloo()(c));
+  // The map by name is read as the fair too (big enough not to be a part by its size alone).
+  const fair = (c: Call) => (isPlaces(c) && c.params.get("filter.tags") ? { body: { results: { entities: c.params.get("filter.location.query") ? [] : [ramen] }, ...(c.params.get("filter.location.query") ? { query: { localities: FAIR } } : {}) } } : standardQloo({ heat: (h) => (h.params.get("filter.location.query") ? heatmap(AUSTIN.latitude, AUSTIN.longitude, 9, 8, FAIR.filter[0].disambiguation) : undefined) })(c));
   // Only food and activity tastes: the areas come from around the centre, and the fair isn't shown as the city.
   let m = mockFetch(fair);
   try {
@@ -892,6 +884,26 @@ test("an empty map says nothing about a place named after the city, and a circle
   try {
     await assert.rejects(matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]), /Qloo has no places in Austin/);
     assert.deepEqual(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags")).map((c) => c.params.get("filter.location.radius")), ["25000"]);
+  } finally {
+    m.restore();
+  }
+});
+
+test("a city read as itself with none of these places isn't widened into its neighbours (live: Hoboken listed Astoria)", async () => {
+  const HOBOKEN = { filter: [{ name: "Austin", disambiguation: "Austin, Travis County, Texas, United States", location: { lat: 30.27, lon: -97.74 } }] };
+  const none = (c: Call) => (isPlaces(c) && c.params.get("filter.tags") ? { body: { results: { entities: [] }, ...(c.params.get("filter.location.query") ? { query: { localities: HOBOKEN } } : {}) } } : standardQloo()(c));
+  let m = mockFetch(none);
+  try {
+    await assert.rejects(matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "natural wine", kind: "tag", id: "urn:tag:cuisine:qloo:japanese_ramen", as: "Natural Wine" }]), /Qloo has no places in Austin, Texas/);
+    assert.ok(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags")).every((c) => !c.params.get("filter.location.radius")));
+  } finally {
+    m.restore();
+  }
+  m = mockFetch(none);
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
+    assert.ok(!r.trace.some((t) => /none of your kinds of places/.test(t.detail)));
+    assert.ok(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags") && c.params.get("filter.location.radius") !== "1200").every((c) => !c.params.get("filter.location.radius")));
   } finally {
     m.restore();
   }
@@ -1025,7 +1037,8 @@ test("a picked Qloo ID is used as is: a cuisine filters places, an entity goes o
     assert.equal(m.calls.filter((c) => c.path === "/search" || c.params.get("filter.query")).length, 0, "no search by name");
     // Each picked ID is looked up once, so its own type decides how it is used.
     assert.deepEqual(m.calls.filter((c) => c.path === "/entities").map((c) => c.params.get("entity_ids")), [UUID(2)]);
-    assert.deepEqual(m.calls.filter((c) => c.params.get("filter.results.tags")).map((c) => c.params.get("filter.results.tags")), ["urn:tag:cuisine:qloo:japanese_ramen"]);
+    // A picked tag isn't looked up: Qloo's lookup by tag ID finds nothing for whole families (live: Climbing Gym).
+    assert.equal(m.calls.filter((c) => c.path === "/v2/tags").length, 0);
     assert.equal(m.calls.find(isHeat)!.params.get("signal.interests.entities"), UUID(2));
     assert.equal(m.calls.find((c) => isPlaces(c) && c.params.get("filter.tags"))!.params.get("filter.tags"), "urn:tag:cuisine:qloo:japanese_ramen");
     assert.ok(r.resolved.every((x) => x.match === "chosen"));
@@ -1073,11 +1086,9 @@ test("a picked ID Qloo doesn't know is reported as not found; the rest is still 
       { name: "Phoebe Bridgers", kind: "artist" },
       { name: "Dune", kind: "movie", id: UUID(99) },
       { name: "Arrival", kind: "movie", id: "12345678-1234-1234-1234-123456789abc" }, // not a valid UUID to Qloo: a 400
-      { name: "nope", kind: "tag", id: "urn:tag:genre:qloo:nope" },
     ]);
-    assert.deepEqual(r.unresolved, ["Dune", "Arrival", "nope"]);
+    assert.deepEqual(r.unresolved, ["Dune", "Arrival"]);
     assert.equal(m.calls.find(isHeat)!.params.get("signal.interests.entities"), UUID(3));
-    assert.equal(m.calls.find(isHeat)!.params.get("signal.interests.tags"), null);
   } finally {
     m.restore();
   }

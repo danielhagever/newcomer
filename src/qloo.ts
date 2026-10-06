@@ -163,17 +163,13 @@ export class Qloo {
     return toTags(await this.get("/v2/tags", { "filter.query": query, "feature.semantic_search": "true", take: String(take) }));
   }
 
-  // Records for IDs a person or an agent picked, so their own type decides what they act on. Measured 2026-10-06: an
-  // unknown ID is left out of the answer (GET /entities?entity_ids=..., and /v2/tags?filter.results.tags=... for
-  // tags), and an entity ID that isn't a valid UUID is a 400.
+  // Records for entity IDs a person or an agent picked, so their own type decides what they act on. Measured
+  // 2026-10-06 (GET /entities?entity_ids=...): an unknown ID is left out of the answer, and one that isn't a valid
+  // UUID is a 400. (Tags aren't looked up: /v2/tags?filter.results.tags finds nothing for whole families.)
   async byIds(ids: string[]): Promise<Entity[]> {
     const body = await this.get("/entities", { entity_ids: ids.join(",") });
     const list: any[] = Array.isArray(body?.results) ? body.results : (body?.results?.entities ?? []);
     return list.map(toEntity).filter((e) => e.id && e.name);
-  }
-
-  async tagsByIds(ids: string[]): Promise<Tag[]> {
-    return toTags(await this.get("/v2/tags", { "filter.results.tags": ids.join(","), take: String(ids.length) }));
   }
 
   // The heatmap of a city: every cell Qloo has (geohash-7, ~150 m, in a city; geohash-6 over a big

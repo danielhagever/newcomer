@@ -218,26 +218,41 @@ async function resolveTag(q: Qloo, it: Interest): Promise<Resolved | null> {
 
 async function resolveOne(q: Qloo, it: Interest): Promise<Resolved | null> {
   if (it.id && validQlooId(it.id)) {
-    // A picked ID is looked up, so its own type decides what it acts on (live: "Blue Note" as a place offers the jazz
-    // club, the label and the artist; the artist picked there went on the places), and an ID Qloo doesn't know is
-    // reported as not found instead of failing the whole search (live: a made-up ID made the taste map a 400).
-    const isTag = TAG_ID.test(it.id);
-    const tag = isTag ? (await q.tagsByIds([it.id]))[0] : undefined;
-    const entity = isTag ? undefined : (await q.byIds([it.id]))[0];
-    if (!tag && !entity) return null;
-    const onPlaces = tag ? placeFamily(tag.id) : entity!.types.includes("urn:entity:place");
+    // A picked entity ID is looked up, so its own type decides what it acts on (live: "Blue Note" as a place offers
+    // the jazz club, the label and the artist; the artist picked there went on the places), and an ID Qloo doesn't know
+    // is reported as not found instead of failing the whole search (live: a made-up ID made the taste map a 400).
+    // A picked tag is used by its ID's family, unlooked-up: Qloo's lookup by tag ID finds nothing for whole families
+    // (activity_type, amenity, interests, setting, genre:qloo; measured 2026-10-06), so "Climbing Gym" would be lost.
+    if (TAG_ID.test(it.id)) {
+      const onPlaces = placeFamily(it.id);
+      return {
+        input: it.name,
+        ...(it.query ? { query: it.query } : {}),
+        as: it.as ?? it.name,
+        id: it.id,
+        type: "tag",
+        signal: "tag",
+        match: "chosen",
+        alternatives: [],
+        kind: it.kind,
+        use: onPlaces ? ["places"] : ["map"],
+        ...(onPlaces ? { placeTag: it.id } : {}),
+      };
+    }
+    const entity = (await q.byIds([it.id]))[0];
+    if (!entity) return null;
+    const onPlaces = entity.types.includes("urn:entity:place");
     return {
       input: it.name,
       ...(it.query ? { query: it.query } : {}),
-      as: tag ? tag.name : label(entity!),
+      as: label(entity),
       id: it.id,
-      type: tag ? (tag.type ?? "tag") : (entity!.types[0] ?? "entity"),
-      signal: isTag ? "tag" : "entity",
+      type: entity.types[0] ?? "entity",
+      signal: "entity",
       match: "chosen",
       alternatives: [],
-      kind: tag ? "tag" : (KIND_OF[entity!.types[0] ?? ""] ?? it.kind),
+      kind: KIND_OF[entity.types[0] ?? ""] ?? it.kind,
       use: onPlaces ? ["places"] : ["map"],
-      ...(onPlaces && isTag ? { placeTag: it.id } : {}),
     };
   }
   const entityType = it.kind && it.kind !== "tag" ? ENTITY_TYPES[it.kind] : undefined;
@@ -317,10 +332,12 @@ export async function matchNeighborhoods(
   let heat: Awaited<ReturnType<Qloo["heatmap"]>> = { points: [] };
   let cityMatches: Entity[] = [];
   let around: Where = { query: center.query }; // where the city is: asked by name, or around its centre once that proved wrong
+  let byName: Locality | undefined; // how Qloo read the city's name for the map
   if (mode === "map") {
     // 2. Where in the city do people who share these tastes concentrate? Qloo is asked about the
     // same city Newcomer located, and the locality it used is checked against it.
     heat = await q.heatmap(mapSignals, around);
+    byName = heat.locality;
     const offBy = heat.locality ? km(heat.locality, center) : heat.points.length ? medianKm(heat.points, center) : 0;
     const part = partOfCity(heat.locality, center) ?? insideCity(heat.locality, center, heat.points.length);
     if (!heat.points.length || offBy > 50 || part) {
@@ -358,8 +375,9 @@ export async function matchNeighborhoods(
         let mine = await q.places(placeSignals, around, 50, filterTags);
         // Qloo can read a city as a place inside it whose name holds the city's, so the part rule can't see it (live:
         // "Moscow, Russia" is Trade Fair Moscow, with no coffee places; 25 km around the centre has 17). Nothing found
-        // by the city's name is asked again around its centre.
-        if (!mine.length && "query" in around) {
+        // there is asked again around the centre; nothing found in a city read as itself stays nothing (live: 25 km
+        // around Hoboken listed Astoria and Carroll Gardens).
+        if (!mine.length && "query" in around && namedInside(byName, center)) {
           trace.push({ step: "Check", detail: `Qloo found none of your kinds of places for "${center.query}" by its name; asked again for 25 km around the city centre` });
           mine = await q.places(placeSignals, { lat: center.lat, lon: center.lon, radiusM: 25000 }, 50, filterTags);
         }
@@ -406,9 +424,10 @@ export async function matchNeighborhoods(
     // The same checks as the map's: Qloo's city is only a part of the city, or somewhere else.
     const part = partOfCity(locality, center);
     const offBy = locality ? km(locality, center) : 0;
-    // Nothing found by the city's name is asked again around its centre too (live: "Moscow, Russia" is Trade Fair
-    // Moscow, whose name holds the city's: no coffee places there, 17 within 25 km of the centre).
-    if (part || offBy > 50 || (!found.length && "query" in around)) {
+    // Nothing found where Qloo read the city as a place inside it is asked again around its centre too (live: "Moscow,
+    // Russia" is Trade Fair Moscow: no coffee places there, 17 within 25 km of the centre); a city read as itself with
+    // nothing found stays a 404 (25 km around Hoboken, with nothing in it, listed New York's neighborhoods, live).
+    if (part || offBy > 50 || (!found.length && "query" in around && namedInside(locality, center))) {
       const wrong = offBy > 50 ? `was ${Math.round(offBy)} km from the located city` : part ? `was only ${part}, a part of it` : `had none of these places${locality ? ` (read as ${locality.name.split(",")[0]})` : ""}`;
       trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" ${wrong}; asked again for 25 km around the city centre` });
       around = { lat: center.lat, lon: center.lon, radiusM: 25000 };
@@ -557,9 +576,16 @@ export async function matchNeighborhoods(
 // themselves, Telluride's 14 cells, aren't affected). Asked after partOfCity, so its own name holds the city's. Its
 // name, else null.
 function insideCity(locality: Locality | undefined, center: { name: string }, cells: number): string | null {
+  return cells > 0 && cells < 30 ? namedInside(locality, center) : null;
+}
+
+// A locality not named as the city whose description names the city after its own name: a place inside it (Trade Fair
+// Moscow), or the city or more under another name (São Paulo's region, Bogotá's capital district). Asked after
+// partOfCity. Its name, else null.
+function namedInside(locality: Locality | undefined, center: { name: string }): string | null {
   const [own, ...within] = (locality?.name ?? "").split(",").map((x) => nameKey(x));
   const city = nameKey(center.name.split(",")[0]);
-  return cells > 0 && cells < 30 && own !== city && within.includes(city) ? locality!.name.split(",")[0].trim() : null;
+  return own !== city && within.includes(city) ? locality!.name.split(",")[0].trim() : null;
 }
 
 function partOfCity(locality: Locality | undefined, center: { name: string }): string | null {
