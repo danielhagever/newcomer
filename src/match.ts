@@ -218,7 +218,9 @@ async function resolveTag(q: Qloo, it: Interest): Promise<Resolved | null> {
 async function resolveOne(q: Qloo, it: Interest): Promise<Resolved | null> {
   if (it.id && validQlooId(it.id)) {
     const isTag = TAG_ID.test(it.id);
-    const onPlaces = isTag && placeFamily(it.id);
+    // A place picked by its id acts on the places, as it does when found by name (live: a picked "Joe's Pizza"
+    // put Brooklyn on the taste map instead). An entity id doesn't say its type, so the kind does.
+    const onPlaces = isTag ? placeFamily(it.id) : it.kind === "place";
     return {
       input: it.name,
       ...(it.query ? { query: it.query } : {}),
@@ -230,7 +232,7 @@ async function resolveOne(q: Qloo, it: Interest): Promise<Resolved | null> {
       alternatives: [],
       kind: it.kind,
       use: onPlaces ? ["places"] : ["map"],
-      ...(onPlaces ? { placeTag: it.id } : {}),
+      ...(onPlaces && isTag ? { placeTag: it.id } : {}),
     };
   }
   const entityType = it.kind && it.kind !== "tag" ? ENTITY_TYPES[it.kind] : undefined;
@@ -283,7 +285,7 @@ export async function matchNeighborhoods(
   trace.push({
     step: "Understand",
     detail:
-      `${resolved.length + same.length} of ${interests.length} interests matched in Qloo's taste graph` +
+      `${resolved.length + same.length} of ${interests.length} ${interests.length === 1 ? "interest" : "interests"} matched in Qloo's taste graph` +
       (same.length ? ` (${same.join("; ")})` : "") +
       (unsure.length ? `; worth checking: ${unsure.map((r) => `${r.input} → ${r.as} (${r.match === "closest" ? "closest name" : "several share this name"})`).join(", ")}` : "") +
       (unresolved.length ? `; not found: ${unresolved.join(", ")}` : ""),
@@ -315,7 +317,8 @@ export async function matchNeighborhoods(
     const offBy = heat.locality ? km(heat.locality, center) : heat.points.length ? medianKm(heat.points, center) : 0;
     const part = partOfCity(heat.locality, center);
     if (!heat.points.length || offBy > 50 || part) {
-      const why = !heat.points.length ? "was empty" : part ? `was only ${part}, a part of it` : `was ${Math.round(offBy)} km from the located city`;
+      // Live: for "Tokyo, Japan" the map was empty and its area only Minato; both are said, as the second moves the place searches.
+      const why = !heat.points.length ? `was empty${part ? ` and only ${part}, a part of it` : offBy > 50 ? ` and ${Math.round(offBy)} km from the located city` : ""}` : part ? `was only ${part}, a part of it` : `was ${Math.round(offBy)} km from the located city`;
       trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" ${why}; asked again for 25 km around the city centre` });
       const circle = { lat: center.lat, lon: center.lon, radiusM: 25000 };
       // The city-wide place lookups below go there too when Qloo's city was wrong, not when only its map was empty
@@ -383,9 +386,11 @@ export async function matchNeighborhoods(
     });
     let { places: found, locality } = await q.placesIn(placeSignals, around, 50, filterTags);
     qlooCity = locality?.name; // the city as Qloo read it, as the map's is (it says the country)
+    // The same checks as the map's: Qloo's city is only a part of the city, or somewhere else.
     const part = partOfCity(locality, center);
-    if (part) {
-      trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" was only ${part}, a part of it; asked again for 25 km around the city centre` });
+    const offBy = locality ? km(locality, center) : 0;
+    if (part || offBy > 50) {
+      trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" was ${part ? `only ${part}, a part of it` : `${Math.round(offBy)} km from the located city`}; asked again for 25 km around the city centre` });
       around = { lat: center.lat, lon: center.lon, radiusM: 25000 };
       qlooCity = undefined; // the part isn't the city (live: "Qloo read the city as Minato, Tokyo, ...")
       found = await q.places(placeSignals, around, 50, filterTags);

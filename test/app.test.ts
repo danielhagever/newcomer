@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import worker, { summary } from "../src/index.ts";
+import worker, { cacheKey, summary } from "../src/index.ts";
 import { cleanInterests, fallbackInterests } from "../src/input.ts";
 import { ENV, memoryKV, mockFetch, places, heatmap, tag, AUSTIN } from "./mock.ts";
 
@@ -203,6 +203,10 @@ test("the page re-sends not-found items with their English name and kind, and la
   assert.match(page, /\(d\.leftOut \|\| \[\]\)\.map\(\(name\) => asked\.find/);
   assert.match(page, /d\.mode === "map" \? "Ranking score/);
   assert.match(page, /of the places that match your tastes \$\{h\.cells === 1 \? "is" : "are"\} here/); // "1 of the places ... is here" (live, Tokyo)
+  assert.match(page, /\$\{h\.cells\} \$\{h\.cells === 1 \? "cell" : "cells"\}\)/); // not "1 cells"
+  // A place picked under "Not it?" is sent with kind place, so it acts on the places as one found by name does.
+  assert.match(page, /\$\{a\.type === "place" \? ` data-place="1"` : ""\}/);
+  assert.match(page, /if \(opt\) return \{ \.\.\.base, \.\.\.\(opt\.dataset\.place \? \{ kind: "place" \} : \{\}\), id: s\.value/);
   // "Sunday around East Kent Avenue", not "Sunday in around ..." (live, Missoula).
   assert.match(page, /\$\{esc\(w\.day\)\} \$\{\/\^around \/\.test\(w\.neighborhood\) \? "" : "in "\}/);
 });
@@ -285,4 +289,15 @@ test("MCP: a body over 256 KB is refused before it is read in full; a normal cal
   const list = await mcp(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }));
   assert.equal(list.status, 200);
   assert.match(await list.text(), /"tools"/);
+});
+
+test("the day's cache key keeps a name's letter case, and changes with its English name, kind and picked id", async () => {
+  // Live: "ncis (la)" is NCIS and "NCIS (LA)" NCIS: Los Angeles; the second was answered with the first's result.
+  const one = (o: object) => cacheKey("Boise, Idaho", [{ name: "NCIS (LA)", kind: "tv_show", ...o }]);
+  const base = await one({});
+  assert.notEqual(await one({ name: "ncis (la)" }), base);
+  assert.notEqual(await one({ kind: "movie" }), base);
+  assert.notEqual(await one({ id: "urn:tag:genre:qloo:jazz" }), base);
+  assert.notEqual(await one({ query: "NCIS: Los Angeles" }), base);
+  assert.equal(await cacheKey("boise, idaho", [{ name: "NCIS (LA)", kind: "tv_show" }]), base, "the city's case doesn't matter");
 });

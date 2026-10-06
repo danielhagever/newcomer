@@ -599,6 +599,30 @@ test("Qloo answering with a part of the city (Tokyo: the ward of Minato) is aske
   }
 });
 
+test("an empty map whose area is only a part of the city says both (live: Tokyo's was empty and only Minato)", async () => {
+  for (const [locality, said, lat, lon] of [
+    ["Hyde Park, Austin, Travis County, Texas, United States", "was empty and only Hyde Park, a part of it;", AUSTIN.latitude, AUSTIN.longitude],
+    ["Austin, Mower County, Minnesota, United States", "was empty and 1", 43.67, -92.97],
+    ["Austin, Travis County, Texas, United States", "was empty;", AUSTIN.latitude, AUSTIN.longitude],
+  ] as const) {
+    const m = mockFetch(standardQloo({ heat: (c) => (c.params.get("filter.location.query") ? heatmap(lat, lon, 0, 8, locality) : undefined) }));
+    try {
+      const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "Dune", kind: "movie" }]);
+      assert.ok(r.trace.some((t) => t.detail.includes(` ${said}`)), `${locality}: ${JSON.stringify(r.trace.map((t) => t.detail))}`);
+      assert.match(r.trace.find((t) => t.step === "Understand")!.detail, /^2 of 2 interests matched/);
+    } finally {
+      m.restore();
+    }
+  }
+  const m = mockFetch(standardQloo());
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.match(r.trace.find((t) => t.step === "Understand")!.detail, /^1 of 1 interest matched/, "one interest, said so (live: \"1 of 1 interests\")");
+  } finally {
+    m.restore();
+  }
+});
+
 test("where Qloo's places have no neighborhood, OpenStreetMap names the area", async () => {
   const m = mockFetch(standardQloo({ hood: () => null }));
   try {
@@ -740,6 +764,45 @@ test("with only food and activity tastes, a part of the city is asked again arou
   }
 });
 
+test("with only food and activity tastes, a city Qloo reads over 50 km away is asked again around it too, as the map's is", async () => {
+  for (const [name, d, lat, lon, asked] of [["Austin", "Austin, Mower County, Minnesota, United States", 43.67, -92.97, 2], ["Round Rock", "Round Rock, Williamson County, Texas, United States", 30.51, -97.68, 1]] as const) {
+    const m = mockFetch((c) =>
+      isPlaces(c) && c.params.get("filter.tags")
+        ? { body: { results: { entities: [place("a", "Ramen A", "Downtown", 30.27, -97.74, ["Ramen restaurant"], ["Evening"])] }, query: { localities: { filter: [{ name, disambiguation: d, location: { lat, lon } }] } } } }
+        : standardQloo()(c),
+    );
+    try {
+      const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]);
+      const cityWide = m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags"));
+      assert.equal(cityWide.length, asked, d);
+      if (asked === 2) {
+        assert.ok(cityWide[1].params.get("filter.location.radius"));
+        assert.ok(r.trace.some((t) => /was 1\d{3} km from the located city; asked again for 25 km around/.test(t.detail)), JSON.stringify(r.trace));
+        assert.equal(r.qlooCity, undefined);
+      }
+    } finally {
+      m.restore();
+    }
+  }
+});
+
+test("with only food and activity tastes, a place over 40 km from the centre makes no area", async () => {
+  // 35 km out is kept (a city's edge), 45 km out isn't.
+  const m = mockFetch((c) =>
+    isPlaces(c) && c.params.get("filter.tags")
+      ? { body: { results: { entities: [place("a", "Ramen A", "Downtown", 30.27, -97.74, ["Ramen restaurant"], ["Evening"]), place("b", "Ramen Edge", "Pflugerville", 30.585, -97.74, ["Ramen restaurant"], ["Evening"]), place("c", "Ramen Far", "Georgetown", 30.675, -97.74, ["Ramen restaurant"], ["Evening"])] } } }
+      : standardQloo()(c),
+  );
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]);
+    const shown = r.neighborhoods.flatMap((h) => [...h.matches, ...h.evidence].map((e) => e.name));
+    assert.ok(shown.includes("Ramen Edge"), JSON.stringify(r.neighborhoods.map((h) => h.name)));
+    assert.ok(!shown.includes("Ramen Far") && !r.neighborhoods.some((h) => h.name === "Georgetown"));
+  } finally {
+    m.restore();
+  }
+});
+
 test("with only food and activity tastes, places filed under the city's own name at its centre are the city centre (Melbourne, live)", async () => {
   const m = mockFetch((c) =>
     isPlaces(c) && c.params.get("filter.tags")
@@ -828,6 +891,24 @@ test("a picked Qloo ID is used as is: a cuisine filters places, an entity goes o
     assert.equal(m.calls.find(isHeat)!.params.get("signal.interests.entities"), UUID(2));
     assert.equal(m.calls.find((c) => isPlaces(c) && c.params.get("filter.tags"))!.params.get("filter.tags"), "urn:tag:cuisine:qloo:japanese_ramen");
     assert.ok(r.resolved.every((x) => x.match === "chosen"));
+  } finally {
+    m.restore();
+  }
+});
+
+test("a picked place ID acts on the places, as the place found by name does (live: Joe's Pizza put Brooklyn on the map)", async () => {
+  const m = mockFetch(standardQloo());
+  try {
+    const { kv } = memoryKV();
+    const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [
+      { name: "Joe's Pizza", kind: "place", id: UUID(7), as: "Joe's Pizza (216 Bedford Ave)" },
+      { name: "ramen", kind: "tag", id: "urn:tag:cuisine:qloo:japanese_ramen", as: "Japanese Ramen" },
+    ]);
+    assert.equal(r.mode, "places");
+    assert.equal(m.calls.filter(isHeat).length, 0, "no taste map");
+    assert.deepEqual(r.resolved.find((x) => x.input === "Joe's Pizza")!.use, ["places"]);
+    assert.equal(r.resolved.find((x) => x.input === "Joe's Pizza")!.placeTag, undefined, "a place isn't a filter tag");
+    assert.ok(m.calls.find((c) => isPlaces(c) && c.params.get("filter.tags"))!.params.get("signal.interests.entities")!.split(",").includes(UUID(7)));
   } finally {
     m.restore();
   }
