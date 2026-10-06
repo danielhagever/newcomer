@@ -218,6 +218,9 @@ test("the one-line answer agrees in number: one runner-up comes next, two come n
   // Not a place named just like the city: Qloo has a coffee shop called "Chicago" (live: "think Skydeck Chicago and Chicago").
   const chicago = { city: "Chicago, Illinois", neighborhoods: [{ ...hood("Loop"), evidence: [{ id: "a", name: "Skydeck Chicago", tags: ["Observation deck", "Tourist attraction"] }, { id: "b", name: "Chicago", tags: ["Coffee shop", "Cafe"] }, { id: "c", name: "Cloud Gate", tags: ["Sculpture", "Tourist attraction"] }] }] } as any;
   assert.match(summary(chicago), /think Skydeck Chicago and Cloud Gate\./);
+  // A name ending in a period ends the sentence once (Toronto, live: "think The Top CN Tower and Dineen Coffee Co..").
+  const toronto = { city: "Toronto, Ontario", neighborhoods: [{ ...hood("Harbourfront"), evidence: [{ id: "a", name: "The Top CN Tower", tags: ["Observation deck"] }, { id: "b", name: "Dineen Coffee Co.", tags: ["Coffee shop", "Cafe"] }] }, hood("Wellington Place")] } as any;
+  assert.match(summary(toronto), /think The Top CN Tower and Dineen Coffee Co\. Wellington Place comes next\.$/);
 });
 
 test("a failed search says Stopped, not Done", () => {

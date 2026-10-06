@@ -27,7 +27,7 @@ const failure = (e: unknown) => {
 };
 
 // Bump whenever the pipeline or the result format changes, so no one gets yesterday's logic.
-const CACHE_VERSION = 51;
+const CACHE_VERSION = 52;
 
 // Returns the result and whether it came from the day's cache (the page says so: the timings in
 // "How we know" are from the run that made it). Only a new search passes the hourly gate: a saved answer
@@ -76,7 +76,8 @@ export function summary(r: MatchResult): string {
     .join(" and ");
   // A sentence starts with a capital, even with OpenStreetMap's "around Momont Road" (live, Missoula).
   const next = b ? ` ${b.name.charAt(0).toUpperCase()}${b.name.slice(1)}${c ? ` and ${c.name} come` : " comes"} next.` : "";
-  return `In ${r.city}, ${a.name} fits your taste best${ev ? `: think ${ev}` : ""}.${next}`;
+  // A name ending in a period ends the sentence ("Dineen Coffee Co.", live).
+  return `In ${r.city}, ${a.name} fits your taste best${ev ? `: think ${ev}` : ""}${ev.endsWith(".") ? "" : "."}${next}`;
 }
 
 // What an agent should tell the person before relying on the answer.
