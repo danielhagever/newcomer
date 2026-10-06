@@ -161,10 +161,15 @@ async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Reso
 
 // A taste (ramen, bouldering, jazz) can have a map variant (a genre) and a place variant (a cuisine,
 // an activity): Qloo lists the same name in many families, each with the entity types it applies to.
+const ROMANCE = new Set(["al", "alla", "alle", "allo", "del", "della", "delle", "dello", "de", "du", "des", "a", "à", "au", "aux", "la", "le", "les", "el", "los", "las"]);
 async function resolveTag(q: Qloo, it: Interest): Promise<Resolved | null> {
   // A note in brackets isn't a taste: "Moonsprout (indie rock band)" is not the Indie Rock genre.
   const text = withoutNote(term(it));
-  const list = (await q.tags(text, 20)).filter((t) => resembles(text, t.name));
+  // A dish's joining word is part of its name: "al pastor" is not the music genre "pastor" (live: Qloo's tag search for
+  // "al pastor" finds only pastor tags, and the genre moved Mexico City's map to the suburbs). A tag that isn't the
+  // exact name must keep every such word typed (the exact name does); English small words ("and", "the") may be left out.
+  const joins = typedName(text).split(" ").filter((w) => ROMANCE.has(w));
+  const list = (await q.tags(text, 20)).filter((t) => resembles(text, t.name) && joins.every((w) => typedName(t.name).split(" ").includes(w)));
   if (!list.length) return null;
   // An exact name only counts if one of its tags can act (a media keyword alone can't); otherwise the
   // closest tag that can act is used, flagged as closest.
@@ -309,8 +314,11 @@ export async function matchNeighborhoods(
     if (!heat.points.length || offBy > 50 || part) {
       const why = !heat.points.length ? "was empty" : part ? `was only ${part}, a part of it` : `was ${Math.round(offBy)} km from the located city`;
       trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" ${why}; asked again for 25 km around the city centre` });
-      around = { lat: center.lat, lon: center.lon, radiusM: 25000 }; // the city-wide place lookup below too
-      heat = await q.heatmap(mapSignals, around);
+      const circle = { lat: center.lat, lon: center.lon, radiusM: 25000 };
+      // The city-wide place lookups below go there too when Qloo's city was wrong, not when only its map was empty
+      // (an empty map says nothing about the city: Mexico City's places then came from 25 km around, live).
+      if (heat.points.length) around = circle;
+      heat = await q.heatmap(mapSignals, circle);
       if (heat.points.length && medianKm(heat.points, center) > 50)
         throw new AppError(`Qloo's map didn't line up with ${center.name}, so no neighborhoods are shown. Try the city with its state or country.`, 502);
     }
@@ -373,12 +381,13 @@ export async function matchNeighborhoods(
     if (part) {
       trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" was only ${part}, a part of it; asked again for 25 km around the city centre` });
       around = { lat: center.lat, lon: center.lon, radiusM: 25000 };
+      qlooCity = undefined; // the part isn't the city (live: "Qloo read the city as Minato, Tokyo, ...")
       found = await q.places(placeSignals, around, 50, filterTags);
     }
     // Qloo can know a taste and have no places for it in the city (live: "oysters" in Boston): say so, not "try again".
     if (!found.length) throw new AppError(`Qloo has no places in ${center.name} for ${resolved.filter((r) => r.placeTag).map((r) => r.as).join(", ") || "these tastes"}. Try a nearby city or another taste.`, 404);
-    hoods = rankByPlaces(found, center);
-    trace.push({ step: "Areas", detail: `Qloo found ${found.length} places that match your food and activity tastes; grouped them by Qloo neighborhood` });
+    hoods = rankByPlaces(found.filter(visitable), center); // closed or unvisitable places don't make an area
+    trace.push({ step: "Areas", detail: `Qloo found ${found.length} ${found.length === 1 ? "place that matches" : "places that match"} your food and activity tastes; grouped them by Qloo neighborhood` });
   }
 
   // Name each area from Qloo's own neighborhood field, counting only the places inside the area's own square: the
@@ -598,7 +607,10 @@ export const samePlace = (a: Entity, b: Entity) => {
 // Two branches of one chain: the same first two words (small words aside) and a category in common ("Merlo Coffee Cafe
 // QUT Gardens Point" and "Merlo Coffee Cafe | UQ Saint Lucia Campus", Brisbane, live; not "Golden Gate Park" and
 // "Golden Gate Bridge", nor two museums of something).
-const brand = (s: string) => placeKey(s).split(" ").filter((w) => !["the", "of", "and", "a", "an", "at"].includes(w)).slice(0, 2).join(" ");
+// Small words in several languages aside ("Taquería Los Primos" and "Taquería Los Hornillos" are two taquerías, Mexico City
+// live; "Piazza del Popolo" and "Piazza del Quirinale" two squares).
+const BRAND_SMALL = new Set(["the", "of", "and", "a", "an", "at", "al", "de", "del", "della", "di", "da", "du", "des", "la", "le", "les", "el", "los", "las", "y", "et", "e"]);
+const brand = (s: string) => placeKey(s).split(" ").filter((w) => !BRAND_SMALL.has(w)).slice(0, 2).join(" ");
 const sameChain = (a: Entity, b: Entity) => brand(a.name) === brand(b.name) && (a.tags ?? []).some((t) => t !== "Tourist attraction" && (b.tags ?? []).includes(t));
 
 function mostCommon(xs: string[]): string | undefined {
