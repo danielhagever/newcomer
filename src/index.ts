@@ -27,7 +27,7 @@ const failure = (e: unknown) => {
 };
 
 // Bump whenever the pipeline or the result format changes, so no one gets yesterday's logic.
-const CACHE_VERSION = 56;
+const CACHE_VERSION = 57;
 
 // The saved answer's key. Names keep their letter case: the name matching reads it, and 13 of 523 recorded names
 // change answer by case (live: "ncis (la)" is NCIS, "NCIS (LA)" NCIS: Los Angeles), so the first spelling searched
@@ -104,7 +104,7 @@ function buildServer(env: Env, req: Request): McpServer {
     {
       title: "Find neighborhoods that share your taste",
       description:
-        "For someone moving to a city: ranks the city's neighborhoods by how strongly the people there share the person's tastes (Qloo heatmap), names the places that show it, and drafts a two-day scouting weekend. Pass each interest by its English name as Qloo knows it, accents kept ('Fauda', not 'פאודה'; 'Björk'), with a kind (artist, movie, tv_show, book, podcast, video_game, brand, place, or tag for cuisines, activities and genres). If a name was only a closest match, or several Qloo entries share it, the answer says which entry was used, with its Qloo id, and lists any alternatives with theirs: ask the person whether it's the one they meant; to use another, call again with that id on the interest (with kind place when it is a place). Send one tool call per request.",
+        "For someone moving to a city: ranks the city's neighborhoods by how strongly the people there share the person's tastes (Qloo heatmap), names the places that show it, and drafts a two-day scouting weekend. Pass each interest by its English name as Qloo knows it, accents kept ('Fauda', not 'פאודה'; 'Björk'), with a kind (artist, movie, tv_show, book, podcast, video_game, brand, place, or tag for cuisines, activities and genres). If a name was only a closest match, or several Qloo entries share it, the answer says which entry was used, with its Qloo id, and lists any alternatives with theirs: ask the person whether it's the one they meant; to use another, call again with that id on the interest (its own type decides how it is used). Send one tool call per request.",
       inputSchema: z.object({
         city: z.string().min(2).max(MAX_CITY).describe("City the person is moving to, with its state or country, e.g. 'Austin, Texas'"),
         interests: z

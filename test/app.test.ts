@@ -204,9 +204,6 @@ test("the page re-sends not-found items with their English name and kind, and la
   assert.match(page, /d\.mode === "map" \? "Ranking score/);
   assert.match(page, /of the places that match your tastes \$\{h\.cells === 1 \? "is" : "are"\} here/); // "1 of the places ... is here" (live, Tokyo)
   assert.match(page, /\$\{h\.cells\} \$\{h\.cells === 1 \? "cell" : "cells"\}\)/); // not "1 cells"
-  // A place picked under "Not it?" is sent with kind place, so it acts on the places as one found by name does.
-  assert.match(page, /\$\{a\.type === "place" \? ` data-place="1"` : ""\}/);
-  assert.match(page, /if \(opt\) return \{ \.\.\.base, \.\.\.\(opt\.dataset\.place \? \{ kind: "place" \} : \{\}\), id: s\.value/);
   // "Sunday around East Kent Avenue", not "Sunday in around ..." (live, Missoula).
   assert.match(page, /\$\{esc\(w\.day\)\} \$\{\/\^around \/\.test\(w\.neighborhood\) \? "" : "in "\}/);
 });

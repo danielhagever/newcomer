@@ -13,6 +13,21 @@ const isHeat = (c: Call) => qloo(c) && c.params.get("filter.type") === "urn:heat
 const isPlaces = (c: Call) => qloo(c) && c.params.get("filter.type") === "urn:entity:place";
 const PLACE = "urn:entity:place";
 
+// Records by ID, as GET /entities and /v2/tags?filter.results.tags answer for a picked ID (an unknown ID is left out).
+const BY_ID = [
+  { entity_id: UUID(1), name: "Dune", disambiguation: "2021", types: ["urn:entity:movie"] },
+  { entity_id: UUID(2), name: "Dune", disambiguation: "1984", types: ["urn:entity:movie"] },
+  { entity_id: UUID(3), name: "Phoebe Bridgers", disambiguation: "Phoebe Bridgers", types: ["urn:entity:artist"] },
+  { entity_id: UUID(6), name: "Fauda", disambiguation: "2015", types: ["urn:entity:tv_show"] },
+  { entity_id: UUID(7), name: "Joe's Pizza", disambiguation: "216 Bedford Ave Brooklyn, NY 11249", types: [PLACE] },
+  { entity_id: UUID(8), name: "Blue Note", types: ["urn:entity:artist"] },
+];
+const TAGS_BY_ID = [
+  tag("urn:tag:cuisine:qloo:japanese_ramen", "Japanese Ramen", [PLACE]),
+  tag("urn:tag:good_for:qloo:natural_wine_bar", "Natural Wine Bar", [PLACE]),
+  tag("urn:tag:genre:qloo:jazz", "Jazz", ["urn:entity:artist", "urn:entity:movie"]),
+];
+
 // A Qloo that knows a few things the way the live one answers them.
 function standardQloo(opts: { heat?: (c: Call) => unknown; hood?: (c: Call) => string | null } = {}) {
   return (c: Call) => {
@@ -28,6 +43,16 @@ function standardQloo(opts: { heat?: (c: Call) => unknown; hood?: (c: Call) => s
       if (q === "Phoebe Bridgers") return { body: { results: [{ entity_id: UUID(3), name: "Phoebe Bridgers", disambiguation: "Phoebe Bridgers", types: ["urn:entity:artist"] }] } };
       if (q === "Phoebe") return { body: { results: [{ entity_id: UUID(3), name: "Phoebe Bridgers", types: ["urn:entity:artist"] }, { entity_id: UUID(4), name: "Phoebe Snow", types: ["urn:entity:artist"] }] } };
       return { body: { results: [] } };
+    }
+    if (c.path === "/entities") {
+      const ids = (c.params.get("entity_ids") ?? "").split(",");
+      // Live: an ID that isn't a valid UUID is a 400 ("entity_ids should be an array of valid UUIDs").
+      if (ids.some((id) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))) return { status: 400, body: { errors: [{ message: "entity_ids:  entity_ids should be an array of valid UUIDs" }] } };
+      return { body: { results: BY_ID.filter((e) => ids.includes(e.entity_id)) } };
+    }
+    if (c.path === "/v2/tags" && c.params.get("filter.results.tags")) {
+      const ids = c.params.get("filter.results.tags")!.split(",");
+      return { body: { results: { tags: TAGS_BY_ID.filter((t) => ids.includes(t.id)) } } };
     }
     if (c.path === "/v2/tags") {
       const q = c.params.get("filter.query")!;
@@ -282,6 +307,8 @@ test("an area is named by the places inside its own square, else OpenStreetMap, 
       if (c.host === "photon.komoot.io") return { status: o.photonStatus ?? 200, body: { features: [{ properties: o.osm ?? { district: "Rosslyn" } }] } };
       if (c.host === "geocoding-api.open-meteo.com" && city.includes("Japan")) return { body: { results: [{ ...AUSTIN, name: "Tokyo", admin1: "Tokyo", country: "Japan", country_code: "JP" }] } };
       if (c.host === "geocoding-api.open-meteo.com" && city.includes("Korea")) return { body: { results: [{ ...AUSTIN, name: "Seoul", admin1: "Seoul", country: "South Korea", country_code: "KR" }] } };
+      if (c.host === "geocoding-api.open-meteo.com" && city.includes("Victoria")) return { body: { results: [{ ...AUSTIN, admin1: "Victoria", country: "Australia", country_code: "AU" }] } };
+      if (c.host === "geocoding-api.open-meteo.com" && city.includes("Ontario")) return { body: { results: [{ ...AUSTIN, admin1: "Ontario", country: "Canada", country_code: "CA" }] } };
       if ((o.far || o.locality) && isHeat(c)) return { body: heatmap(AUSTIN.latitude + (o.far ? 0.05 : 0), AUSTIN.longitude, 9, 8, o.locality) };
       if (o.coarse && isHeat(c)) {
         const h = heatmap(AUSTIN.latitude, AUSTIN.longitude);
@@ -339,10 +366,12 @@ test("an area is named by the places inside its own square, else OpenStreetMap, 
   // Most places inside filed under the city's own name, at the city's centre: the city centre (Melbourne's CBD is the
   // suburb "Melbourne", live; dropping that name let Fitzroy name it). Away from the centre, the next name.
   assert.equal(await run({ inside: ["Austin", "Austin", "Austin", "Hyde Park"] }), "Downtown Austin");
-  assert.equal(await run({ inside: ["Austin", "Austin", "Austin", "Hyde Park"], locality: "Austin, Travis County, Texas, Australia" }), "Austin city centre");
+  assert.equal(await run({ inside: ["Austin", "Austin", "Austin", "Hyde Park"], city: "Austin, Victoria" }), "Austin city centre");
+  // The country is the located city's own, not Qloo's (it is gone when Qloo's city is replaced by a circle).
+  assert.equal(await run({ inside: ["Austin", "Austin", "Austin", "Hyde Park"], locality: "Austin, Victoria, Australia" }), "Downtown Austin");
   assert.equal(await run({ inside: ["Austin", "Austin", "Austin", "Hyde Park"], far: true }), "Hyde Park");
   assert.equal(await run({ inside: ["Hyde Park", "Hyde Park", "Austin"] }), "Hyde Park");
-  assert.equal(await run({ inside: ["Austin", "Austin", "Austin", "Hyde Park"], locality: "Montreal, Island of Montreal, Quebec, Canada" }), "Downtown Austin"); // Canada too
+  assert.equal(await run({ inside: ["Austin", "Austin", "Austin", "Hyde Park"], city: "Austin, Ontario" }), "Downtown Austin"); // Canada too
   assert.equal(await run({ inside: ["Austin", "Austin", "Austin", "Hyde Park", "Hyde Park"], insideIs: "Courthouse" }), "Rosslyn"); // places no one visits don't vote
   // OpenStreetMap's spot itself: a neighbourhood is a name (Missoula's "Lower Rattlesnake", live); another kind of spot
   // is not, and a street comes from its street ("around Fair Way", not the fair office's own name).
@@ -786,6 +815,112 @@ test("with only food and activity tastes, a city Qloo reads over 50 km away is a
   }
 });
 
+test("a place search that finds nothing by the city's name is asked again around its centre (live: Moscow read as Trade Fair Moscow)", async () => {
+  const FAIR = { filter: [{ name: "Trade Fair Austin, All-Texas Exhibition Centre", disambiguation: "Trade Fair Austin, All-Texas Exhibition Centre, Austin, Texas, United States", location: { lat: 30.33, lon: -97.7 } }] };
+  const ramen = place("a", "Ramen A", "Downtown", 30.27, -97.74, ["Ramen restaurant"], ["Evening"]);
+  const fair = (c: Call) => (isPlaces(c) && c.params.get("filter.tags") ? { body: { results: { entities: c.params.get("filter.location.query") ? [] : [ramen] }, ...(c.params.get("filter.location.query") ? { query: { localities: FAIR } } : {}) } } : standardQloo()(c));
+  // Only food and activity tastes: the areas come from around the centre, and the fair isn't shown as the city.
+  let m = mockFetch(fair);
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]);
+    assert.equal(r.mode, "places");
+    assert.deepEqual(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags")).map((c) => !!c.params.get("filter.location.radius")), [false, true]);
+    assert.ok(r.trace.some((t) => t.detail === `Qloo's area for "Austin, Texas" had none of these places (read as Trade Fair Austin); asked again for 25 km around the city centre`), JSON.stringify(r.trace));
+    assert.equal(r.qlooCity, undefined);
+    assert.ok(r.neighborhoods.length);
+  } finally {
+    m.restore();
+  }
+  // With an artist too: your kinds of places are asked again the same way.
+  m = mockFetch(fair);
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
+    assert.equal(r.mode, "map");
+    assert.deepEqual(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags") && !c.params.get("filter.location.radius")?.match(/^1[0-9]{3}$/)).map((c) => c.params.get("filter.location.radius")), [null, "25000"]);
+    assert.ok(r.trace.some((t) => t.detail === `Qloo found none of your kinds of places for "Austin, Texas" by its name; asked again for 25 km around the city centre`));
+    assert.ok(r.trace.some((t) => /^Qloo found 1 place in the city that is one of your food or activity tastes/.test(t.detail)), JSON.stringify(r.trace));
+  } finally {
+    m.restore();
+  }
+});
+
+test("a tiny map of a place inside the city named after it is a part too (live: Moscow's 4 cells at Trade Fair Moscow)", async () => {
+  // Such names also come for the city or more (São Paulo's region, 541 cells), and small towns have small maps named as
+  // themselves (Telluride, 14 cells): neither is asked again.
+  for (const [locality, groups, per, asked] of [
+    ["Trade Fair Austin, All-Texas Exhibition Centre, Austin, Travis County, Texas, United States", 1, 4, 2],
+    ["Trade Fair Austin, All-Texas Exhibition Centre, Austin, Travis County, Texas, United States", 5, 6, 1],
+    ["Greater Austin Region, Austin, Texas, United States", 9, 8, 1],
+    ["Austin, Travis County, Texas, United States", 1, 4, 1],
+    ["Austin, Austin, Travis County, Texas, United States", 1, 4, 1], // the city itself (Paris is written this way, live)
+    ["Austin Bergstrom Airport, Travis County, Texas, United States", 1, 4, 1], // the city named only in its own name
+  ] as const) {
+    const m = mockFetch(standardQloo({ heat: (c) => (c.params.get("filter.location.query") ? heatmap(AUSTIN.latitude, AUSTIN.longitude, groups, per, locality) : undefined) }));
+    try {
+      const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+      assert.equal(m.calls.filter(isHeat).length, asked, `${locality} ${groups * per} cells`);
+      if (asked === 2) assert.ok(r.trace.some((t) => t.detail.includes("was only Trade Fair Austin, a part of it; asked again")));
+    } finally {
+      m.restore();
+    }
+  }
+});
+
+test("an empty map says nothing about a place named after the city, and a circle already asked isn't asked again", async () => {
+  const fair = "Trade Fair Austin, All-Texas Exhibition Centre, Austin, Travis County, Texas, United States";
+  let m = mockFetch(standardQloo({ heat: (c) => (c.params.get("filter.location.query") ? heatmap(AUSTIN.latitude, AUSTIN.longitude, 0, 8, fair) : undefined) }));
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.ok(r.trace.some((t) => t.detail === `Qloo's area for "Austin, Texas" was empty; asked again for 25 km around the city centre`), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
+  }
+  // Qloo's city was a part, so everything is already asked around the centre: nothing found there isn't asked twice.
+  const part = "Hyde Park, Austin, Travis County, Texas, United States";
+  const noRamen = (empty: boolean) => (c: Call) =>
+    isPlaces(c) && c.params.get("filter.tags") ? { body: { results: { entities: [] } } } : standardQloo({ heat: (h) => (h.params.get("filter.location.query") ? heatmap(AUSTIN.latitude, AUSTIN.longitude, 9, 8, part) : empty ? heatmap(AUSTIN.latitude, AUSTIN.longitude, 0, 8) : undefined) })(c);
+  m = mockFetch(noRamen(false));
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
+    assert.equal(r.mode, "map");
+    assert.deepEqual(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags") && c.params.get("filter.location.radius") !== "1200").map((c) => c.params.get("filter.location.radius")), ["25000"]);
+    assert.ok(!r.trace.some((t) => /none of your kinds of places/.test(t.detail)));
+  } finally {
+    m.restore();
+  }
+  m = mockFetch(noRamen(true)); // the circle's map is empty too: only the ramen places could rank the areas
+  try {
+    await assert.rejects(matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]), /Qloo has no places in Austin/);
+    assert.deepEqual(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags")).map((c) => c.params.get("filter.location.radius")), ["25000"]);
+  } finally {
+    m.restore();
+  }
+});
+
+test("Qloo's area far away is said by its distance, even when its description names the city", async () => {
+  const far = "Hyde Park, Austin, Mower County, Minnesota, United States";
+  const m = mockFetch(standardQloo({ heat: (c) => (c.params.get("filter.location.query") ? heatmap(43.67, -92.97, 9, 8, far) : undefined) }));
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.ok(r.trace.some((t) => /^Qloo's area for "Austin, Texas" was 1\d{3} km from the located city; asked again/.test(t.detail)), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
+  }
+});
+
+test("places matched to a place you named alone aren't called food and activity tastes", async () => {
+  const m = mockFetch(standardQloo());
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Joe's Pizza", kind: "place", id: UUID(7) }]);
+    assert.equal(r.mode, "places");
+    const areas = r.trace.find((t) => t.step === "Areas")!.detail;
+    assert.match(areas, /match the places you named; grouped/);
+    assert.ok(r.ours.some((x) => x.includes("places matching the places you named")));
+  } finally {
+    m.restore();
+  }
+});
+
 test("with only food and activity tastes, a place over 40 km from the centre makes no area", async () => {
   // 35 km out is kept (a city's edge), 45 km out isn't.
   const m = mockFetch((c) =>
@@ -887,7 +1022,10 @@ test("a picked Qloo ID is used as is: a cuisine filters places, an entity goes o
       { name: "Dune", kind: "movie", id: UUID(2), as: "Dune (1984)" },
       { name: "ramen", kind: "tag", id: "urn:tag:cuisine:qloo:japanese_ramen", as: "Japanese Ramen" },
     ]);
-    assert.equal(m.calls.filter((c) => c.path === "/search" || c.path === "/v2/tags").length, 0);
+    assert.equal(m.calls.filter((c) => c.path === "/search" || c.params.get("filter.query")).length, 0, "no search by name");
+    // Each picked ID is looked up once, so its own type decides how it is used.
+    assert.deepEqual(m.calls.filter((c) => c.path === "/entities").map((c) => c.params.get("entity_ids")), [UUID(2)]);
+    assert.deepEqual(m.calls.filter((c) => c.params.get("filter.results.tags")).map((c) => c.params.get("filter.results.tags")), ["urn:tag:cuisine:qloo:japanese_ramen"]);
     assert.equal(m.calls.find(isHeat)!.params.get("signal.interests.entities"), UUID(2));
     assert.equal(m.calls.find((c) => isPlaces(c) && c.params.get("filter.tags"))!.params.get("filter.tags"), "urn:tag:cuisine:qloo:japanese_ramen");
     assert.ok(r.resolved.every((x) => x.match === "chosen"));
@@ -907,8 +1045,39 @@ test("a picked place ID acts on the places, as the place found by name does (liv
     assert.equal(r.mode, "places");
     assert.equal(m.calls.filter(isHeat).length, 0, "no taste map");
     assert.deepEqual(r.resolved.find((x) => x.input === "Joe's Pizza")!.use, ["places"]);
+    assert.equal(r.resolved.find((x) => x.input === "Joe's Pizza")!.as, "Joe's Pizza (216 Bedford Ave Brooklyn, NY 11249)", "named by Qloo's record, not what was sent");
     assert.equal(r.resolved.find((x) => x.input === "Joe's Pizza")!.placeTag, undefined, "a place isn't a filter tag");
     assert.ok(m.calls.find((c) => isPlaces(c) && c.params.get("filter.tags"))!.params.get("signal.interests.entities")!.split(",").includes(UUID(7)));
+  } finally {
+    m.restore();
+  }
+});
+
+test("a picked ID's own type decides how it is used, whatever kind was typed (live: Blue Note the artist, picked under a place)", async () => {
+  const m = mockFetch(standardQloo());
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Blue Note", kind: "place", id: UUID(8), as: "Blue Note" }]);
+    assert.equal(r.mode, "map");
+    assert.equal(m.calls.find(isHeat)!.params.get("signal.interests.entities"), UUID(8));
+    assert.deepEqual(r.resolved[0].use, ["map"]);
+    assert.equal(r.resolved[0].kind, "artist", "the re-run sends the kind it is");
+  } finally {
+    m.restore();
+  }
+});
+
+test("a picked ID Qloo doesn't know is reported as not found; the rest is still searched (live: a made-up ID was a 400 for all)", async () => {
+  const m = mockFetch(standardQloo());
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [
+      { name: "Phoebe Bridgers", kind: "artist" },
+      { name: "Dune", kind: "movie", id: UUID(99) },
+      { name: "Arrival", kind: "movie", id: "12345678-1234-1234-1234-123456789abc" }, // not a valid UUID to Qloo: a 400
+      { name: "nope", kind: "tag", id: "urn:tag:genre:qloo:nope" },
+    ]);
+    assert.deepEqual(r.unresolved, ["Dune", "Arrival", "nope"]);
+    assert.equal(m.calls.find(isHeat)!.params.get("signal.interests.entities"), UUID(3));
+    assert.equal(m.calls.find(isHeat)!.params.get("signal.interests.tags"), null);
   } finally {
     m.restore();
   }
@@ -1423,9 +1592,10 @@ test("a square with only a few cells (the city's edge) never outranks well-cover
 test("a picked item keeps its English name in the answer", async () => {
   const m = mockFetch(standardQloo());
   try {
-    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "פאודה", query: "Fauda", kind: "tv_show", id: UUID(3), as: "Fauda (2015)" }]);
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "פאודה", query: "Fauda", kind: "tv_show", id: UUID(6), as: "Fauda (2015)" }]);
     assert.equal(r.resolved[0].match, "chosen");
     assert.equal(r.resolved[0].query, "Fauda");
+    assert.equal(r.resolved[0].as, "Fauda (2015)", "named by Qloo's own record");
   } finally {
     m.restore();
   }

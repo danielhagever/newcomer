@@ -162,7 +162,7 @@ function pickList(d) {
     const badge = r.match === "closest" ? ` <span class="badge">closest match</span>` : r.match === "ambiguous" ? ` <span class="badge">several share this name</span>` : r.match === "chosen" ? ` <span class="badge" style="background:var(--soft);color:var(--accent)">your choice</span>` : "";
     const where = r.use && !r.use.includes("map") ? ` <span class="m">· picks the places</span>` : "";
     const choose = (r.match === "closest" || r.match === "ambiguous") && r.alternatives.length
-      ? `<label class="m" for="alt${i}">Not it?</label><select id="alt${i}" data-i="${i}"><option value="">${esc(r.as)}</option>${r.alternatives.map((a) => `<option value="${esc(a.id)}" data-name="${esc(a.name)}"${a.type === "place" ? ` data-place="1"` : ""}>${esc(a.name)}${a.type && a.type !== "tag" && !a.type.startsWith("urn:") ? ` · ${esc(a.type)}` : ""}</option>`).join("")}</select>`
+      ? `<label class="m" for="alt${i}">Not it?</label><select id="alt${i}" data-i="${i}"><option value="">${esc(r.as)}</option>${r.alternatives.map((a) => `<option value="${esc(a.id)}" data-name="${esc(a.name)}">${esc(a.name)}${a.type && a.type !== "tag" && !a.type.startsWith("urn:") ? ` · ${esc(a.type)}` : ""}</option>`).join("")}</select>`
       : "";
     return `<div class="pick"><span>${esc(r.input)}${r.query ? ` (${esc(r.query)})` : ""} → <b>${esc(r.as)}</b>${where}</span>${badge}${choose}</div>`;
   }).join("");
@@ -236,8 +236,8 @@ function wireChoices(d) {
       // not-found and left-out items are sent as they were (with their English name and kind), so the
       // new result still names them.
       const base = { name: r.input, ...(r.query ? { query: r.query } : {}), ...(r.kind ? { kind: r.kind } : {}) };
-      // A place picked here acts on the places, as one found by name does.
-      if (opt) return { ...base, ...(opt.dataset.place ? { kind: "place" } : {}), id: s.value, as: opt.dataset.name };
+      // The server looks the picked ID up: its own type decides what it acts on, whatever kind was typed.
+      if (opt) return { ...base, id: s.value, as: opt.dataset.name };
       if (r.match === "chosen") return { ...base, id: r.id, as: r.as };
       return base;
     }).concat(

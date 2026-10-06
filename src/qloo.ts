@@ -160,16 +160,20 @@ export class Qloo {
   }
 
   async tags(query: string, take = 20): Promise<Tag[]> {
-    const body = await this.get("/v2/tags", { "filter.query": query, "feature.semantic_search": "true", take: String(take) });
-    const list: any[] = body?.results?.tags ?? (Array.isArray(body?.results) ? body.results : []);
-    return list
-      .map((t) => ({
-        id: String(t.id ?? t.tag_id ?? ""),
-        name: String(t.name ?? "").trim(),
-        type: t.type ?? t.subtype,
-        parents: (Array.isArray(t.parents) ? t.parents : []).map((p: any) => String(p?.type ?? p)),
-      }))
-      .filter((t) => t.id && t.name);
+    return toTags(await this.get("/v2/tags", { "filter.query": query, "feature.semantic_search": "true", take: String(take) }));
+  }
+
+  // Records for IDs a person or an agent picked, so their own type decides what they act on. Measured 2026-10-06: an
+  // unknown ID is left out of the answer (GET /entities?entity_ids=..., and /v2/tags?filter.results.tags=... for
+  // tags), and an entity ID that isn't a valid UUID is a 400.
+  async byIds(ids: string[]): Promise<Entity[]> {
+    const body = await this.get("/entities", { entity_ids: ids.join(",") });
+    const list: any[] = Array.isArray(body?.results) ? body.results : (body?.results?.entities ?? []);
+    return list.map(toEntity).filter((e) => e.id && e.name);
+  }
+
+  async tagsByIds(ids: string[]): Promise<Tag[]> {
+    return toTags(await this.get("/v2/tags", { "filter.results.tags": ids.join(","), take: String(ids.length) }));
   }
 
   // The heatmap of a city: every cell Qloo has (geohash-7, ~150 m, in a city; geohash-6 over a big
@@ -216,6 +220,18 @@ export class Qloo {
     const locality = localityOf(body);
     return { places: (body?.results?.entities ?? []).map(toEntity).filter((e: Entity) => e.name), ...(locality ? { locality } : {}) };
   }
+}
+
+function toTags(body: any): Tag[] {
+  const list: any[] = body?.results?.tags ?? (Array.isArray(body?.results) ? body.results : []);
+  return list
+    .map((t) => ({
+      id: String(t.id ?? t.tag_id ?? ""),
+      name: String(t.name ?? "").trim(),
+      type: t.type ?? t.subtype,
+      parents: (Array.isArray(t.parents) ? t.parents : []).map((p: any) => String(p?.type ?? p)),
+    }))
+    .filter((t) => t.id && t.name);
 }
 
 function localityOf(body: any): Locality | undefined {
