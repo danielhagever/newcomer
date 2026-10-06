@@ -2,6 +2,7 @@ import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { matchNeighborhoods, weekendStop, KINDS, type Interest, type Kind, type MatchResult } from "./match.ts";
 import { AppError, Budget, REQUEST_BUDGET, allow } from "./limits.ts";
+import { normalizeName } from "./qloo.ts";
 import { MAX_CITY, MAX_INTERESTS, MAX_NAME, MAX_PARSED, cleanCity, cleanInterests, parseInterests } from "./input.ts";
 
 export interface Env {
@@ -26,7 +27,7 @@ const failure = (e: unknown) => {
 };
 
 // Bump whenever the pipeline or the result format changes, so no one gets yesterday's logic.
-const CACHE_VERSION = 49;
+const CACHE_VERSION = 50;
 
 // Returns the result and whether it came from the day's cache (the page says so: the timings in
 // "How we know" are from the run that made it). Only a new search passes the hourly gate: a saved answer
@@ -66,8 +67,10 @@ export function summary(r: MatchResult): string {
   const [a, b, c] = r.neighborhoods;
   if (!a) return `I couldn't find a neighborhood match in ${r.city}.`;
   // Name places worth going to (the weekend's rule), your own kinds of places first.
+  // Not a place named just like the city ("think Skydeck Chicago and Chicago": a coffee shop, live).
+  const city = normalizeName(r.city.split(",")[0]);
   const ev = [...a.matches, ...a.evidence]
-    .filter(weekendStop)
+    .filter((e) => weekendStop(e) && normalizeName(e.name) !== city)
     .slice(0, 2)
     .map((e) => e.name)
     .join(" and ");

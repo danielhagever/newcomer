@@ -186,7 +186,7 @@ function render(d) {
       ${h.matches.length ? `<div class="m" style="margin-top:10px"><b>Your kind of places here</b></div>${h.matches.map(place).join("")}` : ""}
       ${h.evidence.length ? `<div class="m" style="margin-top:10px"><b>Places people with your taste rate highly</b></div>${h.evidence.map(place).join("")}` : ""}
     </div>`).join("");
-  const weekend = d.weekend.map((w) => `<div style="margin-bottom:10px"><b>${esc(w.day)} in ${esc(w.neighborhood)}</b>${w.stops.map((s) => `<div class="ev"><span class="tag">${esc(s.when)}</span> ${esc(s.place)}${s.why ? ` <span class="m">· ${esc(s.why)}</span>` : ""}</div>`).join("")}</div>`).join("");
+  const weekend = d.weekend.map((w) => `<div style="margin-bottom:10px"><b>${esc(w.day)} ${/^around /.test(w.neighborhood) ? "" : "in "}${esc(w.neighborhood)}</b>${w.stops.map((s) => `<div class="ev"><span class="tag">${esc(s.when)}</span> ${esc(s.place)}${s.why ? ` <span class="m">· ${esc(s.why)}</span>` : ""}</div>`).join("")}</div>`).join("");
   const calls = d.calls.map((c) => `<tr><td><code>${esc(c.path)}</code></td><td>${Object.entries(c.params).map(([k, v]) => `<code>${esc(k)}=${esc(String(v).slice(0, 80))}</code>`).join(" ")}</td><td>${c.status || "no answer"}</td><td>${c.count}</td><td>${c.ms} ms</td></tr>`).join("");
   $("results").innerHTML = `
     <div class="card"><p class="summary">${esc(d.summary)}</p>

@@ -281,6 +281,7 @@ test("an area is named by the places inside its own square, else OpenStreetMap, 
     const m = mockFetch((c) => {
       if (c.host === "photon.komoot.io") return { status: o.photonStatus ?? 200, body: { features: [{ properties: o.osm ?? { district: "Rosslyn" } }] } };
       if (c.host === "geocoding-api.open-meteo.com" && city.includes("Japan")) return { body: { results: [{ ...AUSTIN, name: "Tokyo", admin1: "Tokyo", country: "Japan", country_code: "JP" }] } };
+      if (c.host === "geocoding-api.open-meteo.com" && city.includes("Korea")) return { body: { results: [{ ...AUSTIN, name: "Seoul", admin1: "Seoul", country: "South Korea", country_code: "KR" }] } };
       if (o.coarse && isHeat(c)) {
         const h = heatmap(AUSTIN.latitude, AUSTIN.longitude);
         for (const p of h.results.heatmap) p.location.geohash = p.location.geohash.slice(0, 6); // a big county's ~2.4 km squares
@@ -327,10 +328,17 @@ test("an area is named by the places inside its own square, else OpenStreetMap, 
   assert.equal(await run({ inside: "紀尾井町1", city: tokyo }), "紀尾井町");
   assert.equal(await run({ inside: ["Ebisu minami 1", "Ebisu nishi 1", "Ebisu nishi 2"], city: tokyo }), "Ebisu nishi"); // counted once cleaned
   assert.equal(await run({ osm: { district: "Zona 10" } }), "Zona 10"); // elsewhere a number can be the name (Guatemala City)
+  const seoul = "Seoul, South Korea";
+  assert.equal(await run({ osm: { district: "Itaewon 2(i)-dong" }, city: seoul }), "Itaewon"); // Seoul's own numbers (live)
+  assert.equal(await run({ osm: { district: "Seongsu 1(il)-ga 1(il)-dong" }, city: seoul }), "Seongsu");
+  assert.equal(await run({ osm: { district: "Itaewon 2(i)-dong" } }), "Itaewon 2(i)-dong");
   assert.equal(await run({ around: "Ginza 8-chome", osm: { district: "Austin" } }), "Ginza"); // from the places around too
   // OpenStreetMap's spot itself: a neighbourhood is a name (Missoula's "Lower Rattlesnake", live); another kind of spot
   // is not, and a street comes from its street ("around Fair Way", not the fair office's own name).
   assert.equal(await run({ osm: { osm_key: "place", osm_value: "neighbourhood", name: "Lower Rattlesnake" } }), "Lower Rattlesnake");
+  assert.equal(await run({ osm: { osm_key: "place", osm_value: "neighbourhood", name: "Lower Rattlesnake", suburb: "Rattlesnake Valley" } }), "Lower Rattlesnake"); // before the suburb
+  assert.equal(await run({ osm: { osm_key: "place", osm_value: "neighbourhood", name: "Lower Rattlesnake", locality: "Downtown" } }), "Downtown"); // after the locality
+  assert.equal(await run({ around: "Georgetown", osm: { osm_key: "place", osm_value: "square", name: "Pioneer Courthouse Square" } }), "Georgetown"); // a square isn't a neighborhood
   assert.equal(await run({ osm: { osm_key: "amenity", name: "Missoula County Fair Office", street: "Fair Way" } }), "around Fair Way");
   assert.equal(await run({ around: "Georgetown", osm: { osm_key: "amenity", name: "Missoula County Fair Office" } }), "Georgetown");
   // A lookup OpenStreetMap didn't answer is asked again by the next search (not kept as a spot without a name).
@@ -339,22 +347,59 @@ test("an area is named by the places inside its own square, else OpenStreetMap, 
   assert.equal(await run({ around: "Georgetown", kv }), "Rosslyn");
 });
 
-test("an area with an airport or a travel lounge inside it is left out: it is the airport (Sydney's Mascot, live)", async () => {
-  let first = true;
+test("one place under two ids is listed once, and is one stop of a weekend (Qloo's \"Big Ben\" and \"Big ben\", live)", async () => {
+  const twice = (lat: number, lon: number) => [
+    place("ben1", "Big Ben", "Westminster", lat, lon, ["Historical landmark", "Tourist attraction"], ["Afternoon"]),
+    place("ben2", "Big ben", "Westminster", lat, lon, ["Tourist attraction"], ["Afternoon"]),
+    place("cb1", "The Coffee Bean & Tea Leaf", "Westminster", lat, lon, ["Coffee shop", "Cafe"], ["Morning"]),
+    place("cb2", "The Coffee Bean And Tea Leaf", "Westminster", lat, lon, ["Coffee shop", "Cafe"], ["Afternoon"]),
+  ];
   const m = mockFetch((c) => {
-    if (isPlaces(c) && !c.params.get("filter.tags") && first) {
-      first = false;
-      const at = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
-      return { body: { results: { entities: [place("lounge", "Singapore Airlines SilverKris Lounge", "Mascot", +at[2], +at[1], ["Tourist attraction", "Travel lounge"], ["Morning"]), place("bistro", "The Bistro", "Mascot", +at[2], +at[1], ["Italian restaurant"], ["Midday"])] } } };
+    if (isPlaces(c) && !c.params.get("filter.tags")) {
+      const p = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+      return { body: { results: { entities: twice(+p[2], +p[1]) } } };
     }
     return standardQloo()(c);
   });
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
-    assert.ok(r.trace.some((t) => t.step === "Filter" && t.detail === "Left out 1 area at an airport"), JSON.stringify(r.trace));
-    assert.ok(r.neighborhoods.every((h) => h.name !== "Mascot" && h.evidence.every((e) => e.name !== "The Bistro")));
+    for (const h of r.neighborhoods) assert.equal(h.evidence.length, 2, JSON.stringify(h.evidence.map((e) => e.name)));
   } finally {
     m.restore();
+  }
+  const entity = (id: string, name: string, tags: string[], times: string[]) => ({ id, name, types: ["urn:entity:place"], tags, times });
+  const day = planDay([entity("cb1", "The Coffee Bean & Tea Leaf", ["Coffee shop", "Cafe"], ["Morning"]), entity("cb2", "The Coffee Bean And Tea Leaf", ["Coffee shop", "Cafe"], ["Afternoon"]), entity("g", "A Gallery", ["Art gallery"], ["Evening"])]);
+  assert.equal(day.filter((s) => /Coffee Bean/.test(s.place)).length, 1, JSON.stringify(day)); // the weekend's chain rule (Seoul's Sunday, live)
+});
+
+test("an area with an airport inside it is left out: a place filed as an airport, or a travel lounge at one; other lounges aren't airports", async () => {
+  const at = (p: any, address: string) => ({ ...p, properties: { ...p.properties, address } });
+  const cases: [string, (lat: number, lon: number) => any, boolean][] = [
+    // Live: Sydney's Mascot square, lounges at the airport (Qloo files the lounges, not the airport, there).
+    ["Sydney's airline lounge", (lat, lon) => at(place("lounge", "Singapore Airlines SilverKris Lounge", "Mascot", lat, lon, ["Tourist attraction", "Travel lounge"], ["Morning"]), "Terminal C Sydney Kingsford Smith Airport Sydney NSW 2020"), true],
+    ["an airport", (lat, lon) => place("syd", "Sydney Airport", "Mascot", lat, lon, ["International airport"], ["Morning"]), true],
+    // Live: Qloo files the Galeries Lafayette rooftop as a travel lounge, and a Vienna pension under an airport shuttle.
+    ["the Paris rooftop", (lat, lon) => at(place("roof", "Galeries Lafayette | Rooftop", "Opéra", lat, lon, ["Observation deck", "Travel lounge", "Gift shop"], ["Afternoon"]), "40 Bd Haussmann 75009 Paris France"), false],
+    ["the Vienna pension", (lat, lon) => place("pension", "Pension Neuer Markt", "Innere Stadt", lat, lon, ["Hotel", "Airport shuttle service"], ["Morning"]), false],
+  ];
+  for (const [what, special, dropped] of cases) {
+    let first = true;
+    const m = mockFetch((c) => {
+      if (isPlaces(c) && !c.params.get("filter.tags") && first) {
+        first = false;
+        const p = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+        return { body: { results: { entities: [special(+p[2], +p[1]), place("bistro", "The Bistro", "Mascot", +p[2], +p[1], ["Italian restaurant"], ["Midday"])] } } };
+      }
+      return standardQloo()(c);
+    });
+    try {
+      const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+      assert.equal(r.trace.some((t) => t.step === "Filter" && t.detail === "Left out 1 area at an airport"), dropped, what);
+      assert.equal(r.neighborhoods.some((h) => h.evidence.some((e) => e.name === "The Bistro")), !dropped, what);
+      if (what === "the Paris rooftop") assert.ok(r.neighborhoods.some((h) => h.evidence.some((e) => e.name === "Galeries Lafayette | Rooftop")), "the rooftop is a place to go");
+    } finally {
+      m.restore();
+    }
   }
 });
 
@@ -454,7 +499,7 @@ test("a lookup OpenStreetMap didn't answer isn't taken for a spot without a name
 test("Qloo answering with a part of the city (Tokyo: the ward of Minato) is asked again around the city", async () => {
   // For "Paris" Qloo wrote "Paris, Paris, Paris, Paris Police Prefecture, ..." (2026-10-05): the city itself. A region
   // named after the city ("Região Geográfica Intermediária de São Paulo, São Paulo, ...") is bigger, not a part.
-  for (const [locality, asked] of [["Hyde Park, Austin, Travis County, Texas, United States", 2], ["Austin, Travis County, Texas, United States", 1], ["Austin, Austin, Travis County, Texas, United States", 1], ["Greater Austin Region, Austin, Texas, United States", 1]] as const) {
+  for (const [locality, asked] of [["Hyde Park, Austin, Travis County, Texas, United States", 2], ["Austin, Travis County, Texas, United States", 1], ["Austin, Austin, Travis County, Texas, United States", 1], ["Greater Austin Region, Austin, Texas, United States", 1], ["Travis County, Texas, United States", 1]] as const) {
     const m = mockFetch(standardQloo({ heat: (c) => (c.params.get("filter.location.query") ? heatmap(AUSTIN.latitude, AUSTIN.longitude, 9, 8, locality) : undefined) }));
     try {
       const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
@@ -867,6 +912,7 @@ test("can't-visit places are judged by Qloo's categories, not names, and filtere
     place("s8", "MIT Media Lab", "Downtown", 30.27, -97.74, ["Research institute"], ["Afternoon"]),
     place("s9", "J-WAVE", "Downtown", 30.27, -97.74, ["Radio broadcaster"], ["Morning"]),
     place("s10", "Red Sky Studios", "Downtown", 30.27, -97.74, ["Movie studio"], ["Afternoon"]),
+    place("s11", "Overlook Park", "Downtown", 30.27, -97.74, ["Light rail station"], ["Morning"]), // live, Portland
     place("v1", "The Garage", "Downtown", 30.27, -97.74, ["Cocktail bar"], ["Evening"]),
     place("v2", "Temple Bar", "Downtown", 30.27, -97.74, ["Pub"], ["Evening"]),
     place("v3", "Bank & Bourbon", "Downtown", 30.27, -97.74, ["Restaurant"], ["Evening"]),
@@ -879,7 +925,7 @@ test("can't-visit places are judged by Qloo's categories, not names, and filtere
     const r = await matchNeighborhoods(ENV(kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
     const listed = r.neighborhoods.flatMap((h) => h.evidence.map((e) => e.name));
     assert.deepEqual(listed.sort(), ["Bank & Bourbon", "Cafe One", "Gallery Two", "Temple Bar", "The Garage"]);
-    assert.ok(r.trace.some((t) => t.step === "Filter" && /Left out 10 places/.test(t.detail)));
+    assert.ok(r.trace.some((t) => t.step === "Filter" && /Left out 11 places/.test(t.detail)));
   } finally {
     m.restore();
   }

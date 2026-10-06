@@ -394,13 +394,19 @@ export async function matchNeighborhoods(
   // 10" in Guatemala City), so only the "-chome" form is dropped.
   // Qloo writes some in Japanese, with the number in kanji or straight after the name ("鉄鋼通り三丁目", "紀尾井町1").
   const japan = /\bJapan\b/i.test(center.name);
-  // "chōme" is written with or without its long vowel ("Kabukichō 1-chōme", live).
-  const clean = (n: string) => n.replace(japan ? /\s*\d+(?:-ch[oō]me)?$|[一二三四五六七八九十]+丁目$/i : /\s+\d+-ch[oō]me$/i, "");
+  // "chōme" is written with or without its long vowel ("Kabukichō 1-chōme", live). Seoul's names carry their own
+  // numbers ("Itaewon 2(i)-dong", "Seongsu 1(il)-ga 1(il)-dong", OpenStreetMap's, live): Itaewon, Seongsu.
+  const korea = /\bKorea\b/i.test(center.name);
+  const clean = (n: string) =>
+    n.replace(japan ? /\s*\d+(?:-ch[oō]me)?$|[一二三四五六七八九十]+丁目$/ : /\s+\d+-ch[oō]me$/, "").replace(korea ? /(\s+\d+\([a-z]+\)-(?:ga|dong))+$/ : /$^/, "");
   // Names are counted once cleaned: "Ebisu nishi 1" and "Ebisu nishi 2" outnumber "Ebisu minami 1" (Tokyo, live).
   const byPlaces = (ps: Entity[]) => mostCommon(ps.filter(visitable).map((e) => e.neighborhood).filter(says).map(clean)) ?? "";
-  // An area with an airport or a travel lounge inside it is the airport, not a neighborhood (live: Sydney's Mascot square,
-  // its Sunday a terminal bistro; Qloo tags the lounges, not the airport, there).
-  const airport = (h: Neighborhood) => h.evidence.some((e) => inSquare(h, e) && /\b(airport|travel lounge)\b/i.test((e.tags ?? []).join(" | ")));
+  // An area with an airport inside it is the airport, not a neighborhood: a place Qloo files as an airport, or a travel
+  // lounge at one (live: Sydney's Mascot square, lounges at "Sydney Airport", its Sunday a terminal bistro). Qloo also
+  // files a Paris rooftop, Amsterdam restaurants and a Chicago station lounge as travel lounges, and a Vienna pension
+  // under "Airport shuttle service": those are not airports.
+  const atAirport = (e: Entity) => (e.tags ?? []).some((t) => /\bairport$/i.test(t)) || ((e.tags ?? []).some((t) => /^travel lounge$/i.test(t)) && /\bairport\b/i.test(e.address ?? ""));
+  const airport = (h: Neighborhood) => h.evidence.some((e) => inSquare(h, e) && atAirport(e));
   const atAirports = hoods.filter(airport).length;
   if (atAirports) {
     hoods = hoods.filter((h) => !airport(h));
@@ -561,6 +567,8 @@ function rankByPlaces(found: Entity[], center: { lat: number; lon: number }): Ne
 }
 
 const nameKey = (s: string) => normalizeName(s).replace(/^the\s+/, "");
+// A place's name as spelled loosely: case, "&" for "and" and punctuation aside.
+const placeKey = (s: string) => nameKey(s.replace(/&/g, " and ").replace(/[^\p{L}\p{N}]+/gu, " ").trim());
 
 function mostCommon(xs: string[]): string | undefined {
   const c = new Map<string, number>();
@@ -606,7 +614,9 @@ function dedupeEvidence(hoods: Neighborhood[]): number {
       const home = at ? [...hoods].sort((a, b) => km(a, at) - km(b, at))[0] : hoods[0];
       home[field].push(e);
     }
-    for (const h of hoods) h[field] = h[field].sort((a, b) => (b.affinity ?? 0) - (a.affinity ?? 0)).slice(0, field === "matches" ? 4 : 5);
+    // Qloo can list one place twice under two ids ("Big Ben" and "Big ben", "The Coffee Bean & Tea Leaf" and "... And
+    // ..."): an area lists it once.
+    for (const h of hoods) h[field] = h[field].sort((a, b) => (b.affinity ?? 0) - (a.affinity ?? 0)).filter((e, i, a) => a.findIndex((x) => placeKey(x.name) === placeKey(e.name)) === i).slice(0, field === "matches" ? 4 : 5);
   }
   // A place that is one of your tastes isn't listed again among the taste places.
   for (const h of hoods) h.evidence = h.evidence.filter((e) => !h.matches.some((m) => m.id === e.id));
@@ -614,7 +624,7 @@ function dedupeEvidence(hoods: Neighborhood[]): number {
 }
 
 // Judged on Qloo's categories only: a venue's name ("The Garage", "Temple Bar") says nothing.
-const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|municipal|department of|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office|business center|senior citizen|(subway|train|railway|metro|bus|transit) station|ferry terminal|airport|travel lounge|military|academic department|research institute|radio broadcaster|movie studio)\b/i;
+const NOT_VISITABLE = /\b(schools?|high school|college|university|academy|training cent(er|re)|church|place of worship|mosque|synagogue|temple|hospital|clinic|medical|dentist|doctor|pharmacy|office|corporate|government|municipal|department of|city hall|courthouse|police|fire station|fire department|cemetery|funeral|apartment|condominium|housing|storage|parking|garage|bank|atm|gas station|car dealer|auto repair|insurance|real estate|lawyer|attorney|recording studio|post office|business center|senior citizen|(subway|train|railway|metro|bus|transit|light rail|tram) station|ferry terminal|airport|military|academic department|research institute|radio broadcaster|movie studio)\b/i;
 const visitable = (e: Entity) => !NOT_VISITABLE.test((e.tags ?? []).join(" | "));
 
 async function inBatches<T>(items: T[], size: number, fn: (x: T) => Promise<void>) {
@@ -645,11 +655,11 @@ export function planDay(places: Entity[]): { when: string; place: string; why: s
   const stops: { when: string; place: string; why: string }[] = [];
   for (const [slotName, fits] of SLOTS) {
     const p = places.find(
-      (e) => weekendStop(e) && !used.has(e.id) && !used.has(normalizeName(e.name)) && ((e.times ?? []).some((t) => fits.includes(t)) || (slotName === "Afternoon" && !(e.times ?? []).length)),
+      (e) => weekendStop(e) && !used.has(e.id) && !used.has(placeKey(e.name)) && ((e.times ?? []).some((t) => fits.includes(t)) || (slotName === "Afternoon" && !(e.times ?? []).length)),
     );
     if (!p) continue;
     used.add(p.id);
-    used.add(normalizeName(p.name));
+    used.add(placeKey(p.name));
     stops.push({ when: slotName, place: p.name, why: (p.tags ?? []).slice(0, 2).join(", ") });
   }
   return stops;

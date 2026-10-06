@@ -202,6 +202,8 @@ test("the page re-sends not-found items with their English name and kind, and la
   assert.match(page, /d\.unresolved\.map\(\(name\) => \(d\.interests \|\| \[\]\)\.find\(\(x\) => x\.name === name\) \|\| \{ name \}\)/);
   assert.match(page, /\(d\.leftOut \|\| \[\]\)\.map\(\(name\) => asked\.find/);
   assert.match(page, /d\.mode === "map" \? "Ranking score/);
+  // "Sunday around East Kent Avenue", not "Sunday in around ..." (live, Missoula).
+  assert.match(page, /\$\{esc\(w\.day\)\} \$\{\/\^around \/\.test\(w\.neighborhood\) \? "" : "in "\}/);
 });
 
 test("the one-line answer agrees in number: one runner-up comes next, two come next", () => {
@@ -213,6 +215,9 @@ test("the one-line answer agrees in number: one runner-up comes next, two come n
   // A sentence starts with a capital, even when OpenStreetMap names an area "around <street>" (live, Missoula).
   const missoula = { city: "Missoula, Montana", neighborhoods: ["Downtown", "around Momont Road", "University District"].map(hood) } as any;
   assert.match(summary(missoula), /\. Around Momont Road and University District come next\.$/);
+  // Not a place named just like the city: Qloo has a coffee shop called "Chicago" (live: "think Skydeck Chicago and Chicago").
+  const chicago = { city: "Chicago, Illinois", neighborhoods: [{ ...hood("Loop"), evidence: [{ id: "a", name: "Skydeck Chicago", tags: ["Observation deck", "Tourist attraction"] }, { id: "b", name: "Chicago", tags: ["Coffee shop", "Cafe"] }, { id: "c", name: "Cloud Gate", tags: ["Sculpture", "Tourist attraction"] }] }] } as any;
+  assert.match(summary(chicago), /think Skydeck Chicago and Cloud Gate\./);
 });
 
 test("a failed search says Stopped, not Done", () => {

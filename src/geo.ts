@@ -276,7 +276,7 @@ async function reverseName(lat: number, lon: number): Promise<string[] | null> {
     const d: any = await res.json();
     const p = d.features?.[0]?.properties ?? {};
     const street = p.street ?? (p.osm_key === "highway" ? p.name : undefined);
-    const spot = p.osm_key === "place" ? p.name : undefined;
+    const spot = p.osm_key === "place" && /^(neighbourhood|quarter|suburb)$/.test(p.osm_value) ? p.name : undefined;
     return [p.district, p.locality, spot, p.suburb, street ? `around ${street}` : undefined].filter((n): n is string => typeof n === "string" && !!n.trim());
   } catch {
     return null;
