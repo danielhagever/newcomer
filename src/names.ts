@@ -1,7 +1,7 @@
-// Names typed by a person, matched to what Qloo's search returned (ported from Booker, where 472 realistic
-// inputs and 60 review passes pinned these rules). An exact name is preferred; otherwise a candidate is used
-// only if it resembles what was typed, near names are ranked by how close they are, and "Not it?" offers only
-// close names.
+// Names typed by a person, matched to what Qloo's search returned. This file is identical in Newcomer and Booker
+// (src/names.ts in both): change it in one, copy it to the other. An exact name is preferred; otherwise a candidate is
+// used only if it resembles what was typed, near names are ranked by how close they are, and "Not it?" offers only
+// close names. Pinned by Booker's 472 realistic inputs and the 349 names recorded from Qloo, in both repos' tests.
 
 import { normalizeName, type Entity } from "./qloo.ts";
 
@@ -29,7 +29,7 @@ const allWords = (s: string) =>
     .map((w) => SPELLING[w] ?? w);
 // "A" before an initial is an initial too: "A. R. Rahman", "A G Cook".
 const article = (s: string, ws: string[]) => ws.length > 1 && ARTICLES.has(ws[0]) && !(ws[0] === "a" && (/^\s*a\./i.test(s) || ws[1].length === 1));
-const words = (s: string) => {
+export const words = (s: string) => {
   const ws = allWords(s);
   return article(s, ws) ? ws.slice(1) : ws;
 };
@@ -39,7 +39,7 @@ export const nameKey = (s: string) => words(s).join(" ");
 // side) and only when no name is equal with its spaces, since Wild Child and Wildchild are different acts.
 export const squashed = (s: string) => words(s).join("");
 
-function typoDistance(a: string, b: string): number {
+export function typoDistance(a: string, b: string): number {
   const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
   for (let i = 1; i <= a.length; i++)
     for (let j = 1; j <= b.length; j++) {
@@ -57,7 +57,7 @@ export function resembles(typed: string, name: string): boolean {
 }
 
 // Small words don't make two names alike ("of", "the", "and", "de", "la").
-const SMALL = new Set(["of", "the", "and", "a", "an", "de", "la", "le", "el", "los", "las", "y", "et", "und", "der", "die", "das", "du", "des", "n"]);
+export const SMALL = new Set(["of", "the", "and", "a", "an", "de", "la", "le", "el", "los", "las", "y", "et", "und", "der", "die", "das", "du", "des", "n"]);
 // Words written two ways count as close, not equal ("Hank Williams 3" is close to Hank Williams III, "Maroon
 // Five" to Maroon 5), so that initials still compare without spaces ("J. R. Writer" is J.R. Writer); so does a
 // plural of a short word ("Fleet Fox" is Fleet Foxes).
@@ -76,7 +76,7 @@ function share(a: string[], b: string[], withPlurals = true): number {
   return ca.length ? ca.filter((w) => closeTo(w, cb, plurals)).length / ca.length : 0;
 }
 
-function wordsResemble(a: string[], b: string[], half: boolean): boolean {
+export function wordsResemble(a: string[], b: string[], half: boolean): boolean {
   if (!a.length || !b.length) return false;
   const A = ` ${a.join(" ")} `, B = ` ${b.join(" ")} `;
   if (B.includes(A) || (A.includes(B) && (!half || b.length * 2 >= a.length))) return true;

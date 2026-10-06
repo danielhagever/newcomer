@@ -698,9 +698,9 @@ function rankByPlaces(found: Entity[], center: { lat: number; lon: number }): Ne
     .slice(0, 7);
 }
 
-const nameKey = (s: string) => normalizeName(s).replace(/^the\s+/, "");
+const articleless = (s: string) => normalizeName(s).replace(/^the\s+/, ""); // not names.ts nameKey: no folding
 // A place's name as spelled loosely: case, "&" for "and" and punctuation aside.
-const placeKey = (s: string) => nameKey(s.replace(/&/g, " and ").replace(/[^\p{L}\p{N}]+/gu, " ").trim());
+const placeKey = (s: string) => articleless(s.replace(/&/g, " and ").replace(/[^\p{L}\p{N}]+/gu, " ").trim());
 // The same place under two records: the same name spelled loosely, or one name holding the other's words at the same
 // spot (within 5 m) with a category in common ("The Top CN Tower" and "CN Tower", 1.4 m apart, live; not "360 The
 // Restaurant at the CN Tower", a restaurant there, nor two rooms or shops of one building: ACL Live and its 3TEN room,
@@ -733,7 +733,7 @@ function mostCommon(xs: string[]): string | undefined {
 function mergeByName(hoods: Neighborhood[], mode: MatchResult["mode"]): Neighborhood[] {
   const out: Neighborhood[] = [];
   for (const h of hoods) {
-    const same = out.find((o) => nameKey(o.name) === nameKey(h.name));
+    const same = out.find((o) => articleless(o.name) === articleless(h.name));
     if (!same) out.push(h);
     else {
       if (mode === "places") {

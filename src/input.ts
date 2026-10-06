@@ -9,7 +9,7 @@ export const MAX_CITY = 80;
 
 const clean = (v: unknown, max: number): string => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
 // "Björk" and "bjork" fold to the same letters.
-const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+const unaccented = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
 
 export function cleanCity(v: unknown): string {
   return clean(v, MAX_CITY);
@@ -33,7 +33,7 @@ export function cleanInterests(v: unknown, max = MAX_INTERESTS): Interest[] {
     // keep their accents, and the model drops them ("Björk" -> "Bjork").
     out.push({
       name,
-      ...(query && fold(query) !== fold(name) ? { query } : {}),
+      ...(query && unaccented(query) !== unaccented(name) ? { query } : {}),
       ...(kind ? { kind } : {}),
       ...(id && validQlooId(id) ? { id, ...(as ? { as } : {}) } : {}),
     });
