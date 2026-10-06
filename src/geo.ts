@@ -39,10 +39,26 @@ const OTHER_REGIONS: Record<string, string[]> = {
 };
 // The UK's nations are regions (admin1), not the whole UK: "Bangor, Wales" isn't Bangor in Northern Ireland.
 const COUNTRY_WORDS: Record<string, string> = { usa: "us", "united states": "us", us: "us", uk: "gb", "united kingdom": "gb", czech: "cz", "czech republic": "cz" };
-// A few records carry no country name (Puerto Rico, Hong Kong): the code names it.
-const TERRITORY: Record<string, string> = { PR: "Puerto Rico", HK: "Hong Kong", MO: "Macau" };
-// A region's words, folded, with hyphens and apostrophes as word breaks ("Provence-Alpes-Côte d'Azur").
-const words = (s: unknown) => fold(s).replace(/[-'’]/g, " ").replace(/\s+/g, " ").trim();
+// Territories, whose records carry no country name: their own name, and the country they belong to (Qloo files
+// Puerto Rico's rooms as the US and Hong Kong's as China, live). "Ponce, Puerto Rico" landed in Cuba without this.
+export const TERRITORY: Record<string, [string, string]> = {
+  PR: ["Puerto Rico", "US"], GU: ["Guam", "US"], VI: ["U.S. Virgin Islands", "US"], AS: ["American Samoa", "US"], MP: ["Northern Mariana Islands", "US"],
+  HK: ["Hong Kong", "CN"], MO: ["Macau", "CN"],
+  KY: ["Cayman Islands", "GB"], BM: ["Bermuda", "GB"], VG: ["British Virgin Islands", "GB"], TC: ["Turks and Caicos Islands", "GB"], AI: ["Anguilla", "GB"],
+  MS: ["Montserrat", "GB"], FK: ["Falkland Islands", "GB"], GI: ["Gibraltar", "GB"], SH: ["Saint Helena", "GB"], JE: ["Jersey", "GB"], GG: ["Guernsey", "GB"], IM: ["Isle of Man", "GB"],
+  GL: ["Greenland", "DK"], FO: ["Faroe Islands", "DK"], AW: ["Aruba", "NL"], CW: ["Curaçao", "NL"], SX: ["Sint Maarten", "NL"], BQ: ["Caribbean Netherlands", "NL"],
+  PF: ["French Polynesia", "FR"], NC: ["New Caledonia", "FR"], RE: ["Réunion", "FR"], GP: ["Guadeloupe", "FR"], MQ: ["Martinique", "FR"], GF: ["French Guiana", "FR"],
+  YT: ["Mayotte", "FR"], PM: ["Saint Pierre and Miquelon", "FR"], BL: ["Saint Barthélemy", "FR"], MF: ["Saint Martin", "FR"], WF: ["Wallis and Futuna", "FR"],
+  AX: ["Åland", "FI"], SJ: ["Svalbard", "NO"], CK: ["Cook Islands", "NZ"], NU: ["Niue", "NZ"], NF: ["Norfolk Island", "AU"], CX: ["Christmas Island", "AU"],
+};
+// The country a place is in, a territory counted as its country's.
+export const nation = (cc?: string) => (cc ? (TERRITORY[cc.toUpperCase()]?.[1] ?? cc.toUpperCase()) : undefined);
+// A region's words, folded: hyphens part words ("Provence-Alpes-Côte d'Azur"), apostrophes join them ("Hawai'i").
+const regionWords = (s: unknown) => fold(s).replace(/['’]/g, "").replace(/-/g, " ").replace(/\s+/g, " ").trim();
+// A typed region matches a longer one only when the longer one isn't the same name with a direction or "New" in front:
+// "Hampshire" isn't New Hampshire, "Mexico" not New Mexico, "Wales" not New South Wales (live, unflagged).
+const QUALIFIERS = new Set(["new", "north", "south", "east", "west", "northern", "southern", "eastern", "western", "upper", "lower", "greater", "central"]);
+const qualified = (v: string, n: string) => v.endsWith(` ${n}`) && v.slice(0, -n.length - 1).split(" ").every((w) => QUALIFIERS.has(w));
 
 async function kvGet(cache: KVNamespace, budget: Budget, key: string): Promise<any> {
   if (!budget.take()) return null;
@@ -92,7 +108,10 @@ const ENDONYMS: Record<string, string> = {
   brasil: "Brazil", deutschland: "Germany", espana: "Spain", italia: "Italy", osterreich: "Austria", schweiz: "Switzerland",
   suisse: "Switzerland", nederland: "Netherlands", sverige: "Sweden", norge: "Norway", danmark: "Denmark", polska: "Poland",
   eire: "Ireland", mexico: "Mexico", "great britain": "United Kingdom", britain: "United Kingdom", turkey: "Turkiye",
-  uae: "United Arab Emirates", "czech republic": "Czechia", holland: "Netherlands",
+  uae: "United Arab Emirates", "czech republic": "Czechia", holland: "Netherlands", korea: "South Korea",
+  // Spain's regions in Spanish (Open-Meteo writes them in English: "Toledo, Castilla-La Mancha" was Toledo, Ohio).
+  "castilla-la mancha": "Castille-La Mancha", "castilla la mancha": "Castille-La Mancha", "castilla y leon": "Castille and León",
+  cataluna: "Catalonia", catalunya: "Catalonia", andalucia: "Andalusia", "pais vasco": "Basque Country", euskadi: "Basque Country",
 };
 // Typed words are looked up in these tables, so they must not inherit Object's own names ("constructor", "__proto__").
 for (const t of [US_STATES, OTHER_REGIONS, COUNTRY_WORDS, ALIASES, US_AP, ENDONYMS]) Object.setPrototypeOf(t, null);
@@ -135,7 +154,7 @@ function spellings(name: string): string[] {
 }
 
 export async function cityCenter(cache: KVNamespace, budget: Budget, city: string): Promise<Place | null> {
-  const key = `city19:${city.toLowerCase()}`; // city19: with the country code and population
+  const key = `city20:${city.toLowerCase()}`; // city20: with the country code and population; counties, territories, qualifiers
   const hit = await kvGet(cache, budget, key);
   if (hit) return hit as Place;
   // "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK".
@@ -202,11 +221,13 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   // A part fits by name (a state, province or country, or their codes) or, failing that, as an ISO
   // country code; a state wins over a country code ("Richmond, CA" is California, not Canada).
   const byName = (r: any, part: string) => {
-    // A territory's record has no country name (Puerto Rico, Hong Kong); Hong Kong and Macau are also China.
-    const own = [r.admin1, r.country ?? TERRITORY[r.country_code], ...(r.country_code === "HK" || r.country_code === "MO" ? ["China"] : [])].filter(Boolean).map(words);
+    // The state, the county ("Winchester, Hampshire"; "Saint-Etienne, Loire" is the département), the country, and for a
+    // territory its own name (and China for Hong Kong and Macau). A territory fits its country by code words only
+    // ("Ponce, Puerto Rico, United States"), so "Saint-Denis, France" stays the one by Paris, not Réunion's.
+    const own = [r.admin1, r.admin2, r.country ?? TERRITORY[r.country_code]?.[0], nation(r.country_code) === "CN" && "China"].filter(Boolean).map(regionWords);
     // Whole words only: "India" is in "Republic of India", not in "Indiana" (live: "Calcutta, India" was Calcutta,
     // Indiana); a hyphen parts words ("La Mancha" is in "Castilla-La Mancha", "Saxony" in "Saxony-Anhalt").
-    return regionNames(part).map(words).some((n) => own.some((v) => v === n || (n.length > 3 && ` ${v} `.includes(` ${n} `)))) || COUNTRY_WORDS[part] === fold(r.country_code);
+    return regionNames(part).map(regionWords).some((n) => own.some((v) => v === n || (n.length > 3 && ` ${v} `.includes(` ${n} `) && !qualified(v, n)))) || [fold(r.country_code), fold(nation(r.country_code))].includes(COUNTRY_WORDS[part]);
   };
   const byCode = (r: any, part: string) => byName(r, part) || (part.length === 2 && part === fold(r.country_code));
   // French saints are filed with hyphens ("Saint-Étienne", "Saint-Malo"): asked for only when no spelling found
@@ -242,7 +263,7 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   // "New York, New York" as the city (measured).
   // UK cities with their nation: Qloo reads "Bangor, United Kingdom" as Bangor in Northern Ireland and
   // "Bangor, Wales" right (measured). Québec with "City": "Québec, Quebec" is the province to Qloo.
-  const region = r.country_code === "US" || r.country_code === "CA" || (r.country_code === "GB" && r.admin1) ? r.admin1 : (r.country ?? TERRITORY[r.country_code] ?? r.admin1);
+  const region = r.country_code === "US" || r.country_code === "CA" || (r.country_code === "GB" && r.admin1) ? r.admin1 : (r.country ?? TERRITORY[r.country_code]?.[0] ?? r.admin1);
   const cityName = r.country_code === "CA" && fold(r.name) === "quebec" && fold(r.admin1) === "quebec" ? `${r.name} City` : r.name;
   const label = `${cityName}${region ? ", " + region : ""}`;
   const typedRegion = rest.filter(Boolean).join(", ");

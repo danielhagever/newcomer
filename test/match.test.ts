@@ -948,11 +948,42 @@ test("St and Saint are one name to the city rules (live: Qloo's \"Saint Petersbu
   } finally {
     m.restore();
   }
+  // Accents and "Saint" fold in every city rule: a tiny map of a place named after the city (namedInside), and a place
+  // search that finds nothing in something named after it (notTheCity), spelled "Saint" and with accents.
+  const fair = "Trade Fair Saint Augustine, Saint Augustine, Florida, United States";
+  m = mockFetch((c) => geo(c) ?? standardQloo({ heat: (h) => (h.params.get("filter.location.query") ? heatmap(AUSTIN.latitude, AUSTIN.longitude, 1, 4, fair) : undefined) })(c));
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "St. Augustine, Florida", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.ok(r.trace.some((t) => t.detail.includes("was only Trade Fair Saint Augustine, a part of it")), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
+  }
+  const council = { filter: [{ name: "City of Saint Augustíne", disambiguation: "City of Saint Augustíne, St. Johns County, Florida, United States", location: { lat: 30.27, lon: -97.74 } }] };
+  const ramen = place("a", "Ramen A", "Hyde Park", 30.3, -97.73, ["Ramen restaurant"], ["Evening"]);
+  m = mockFetch((c) => geo(c) ?? (isPlaces(c) && c.params.get("filter.tags") ? { body: { results: { entities: c.params.get("filter.location.query") ? [] : [ramen] }, ...(c.params.get("filter.location.query") ? { query: { localities: council } } : {}) } } : standardQloo()(c)));
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "St. Augustine, Florida", [{ name: "ramen", kind: "tag" }]);
+    assert.ok(r.trace.some((t) => t.detail.startsWith(`Qloo's area for "St. Augustine, Florida" had none of these places (read as City of Saint Augustíne); asked again`)), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
+  }
   // An area Qloo files under the city's own name, spelled "Saint", isn't named after the city.
   m = mockFetch((c) => geo(c) ?? standardQloo({ hood: () => "Saint Augustine" })(c));
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "St. Augustine, Florida", [{ name: "Phoebe Bridgers", kind: "artist" }]);
     assert.ok(!r.neighborhoods.some((h) => h.name === "Saint Augustine"), JSON.stringify(r.neighborhoods.map((h) => h.name)));
+  } finally {
+    m.restore();
+  }
+});
+
+test("ø, ß and ł fold in city names as in typed names (Tromsø is Qloo's \"Tromso\")", async () => {
+  const geo = (c: Call) => (c.host === "geocoding-api.open-meteo.com" ? { body: { results: [{ ...AUSTIN, name: "Tromsø", admin1: "Troms", country: "Norway", country_code: "NO" }] } } : undefined);
+  const part = "Sentrum, Tromso, Troms, Norway";
+  const m = mockFetch((c) => geo(c) ?? standardQloo({ heat: (h) => (h.params.get("filter.location.query") ? heatmap(AUSTIN.latitude, AUSTIN.longitude, 9, 8, part) : undefined) })(c));
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Tromsø, Norway", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.ok(r.trace.some((t) => t.detail.includes("was only Sentrum, a part of it")), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     m.restore();
   }

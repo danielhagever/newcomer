@@ -586,13 +586,8 @@ const cityRadiusKm = (population?: number) => Math.min(25, Math.max(3, Math.roun
 
 // A place name for comparing cities: accents and case don't count, nor "St" for "Saint" (live: Open-Meteo's "St
 // Petersburg" is "Saint Petersburg" to Qloo).
-const cityKey = (s: string) => placeKey(s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")).replace(/\bst\b/g, "saint").replace(/\bste\b/g, "sainte");
+const cityKey = (s: string) => typedName(s).replace(/\bst\b/g, "saint").replace(/\bste\b/g, "sainte"); // names.ts folds accents, ø, ß, ł
 
-// Qloo can answer a city asked by name with a part of it: for "Tokyo, Japan" its locality is Minato ("Minato, Tokyo,
-// ...", one ward, 6 km across; measured on 35 cities, the only one then; later "London, Ontario" as Wortley Village).
-// A locality named after the city is the city or bigger ("Paris Police Prefecture", "Região Geográfica Intermediária de
-// São Paulo, São Paulo, ..."), or a place inside it this rule can't tell apart (Trade Fair Moscow: the searches that
-// find nothing by name ask again around the centre). The part's name, else null.
 // A place inside the city named after it, which partOfCity can't tell from the city or a region named after it: live,
 // "Moscow, Russia" is Trade Fair Moscow ("Trade Fair Moscow, All-Russia Exhibition Centre, Moscow, ..."), a map of 4
 // cells. Such names also come for the city or more (São Paulo's region, 541 cells; Bogotá's capital district, 101;
@@ -622,6 +617,11 @@ function notTheCity(locality: Locality | undefined, center: { name: string }): s
   return own !== city && own.includes(city) ? locality!.name.split(",")[0].trim() : null;
 }
 
+// Qloo can answer a city asked by name with a part of it: for "Tokyo, Japan" its locality is Minato ("Minato, Tokyo,
+// ...", one ward, 6 km across; measured on 35 cities, the only one then; later "London, Ontario" as Wortley Village).
+// A locality named after the city is the city or bigger ("Paris Police Prefecture", "Região Geográfica Intermediária de
+// São Paulo, São Paulo, ..."), or a place inside it this rule can't tell apart (Trade Fair Moscow: the searches that
+// find nothing by name ask again around the centre). The part's name, else null.
 function partOfCity(locality: Locality | undefined, center: { name: string }): string | null {
   const [own, ...within] = (locality?.name ?? "").split(",").map((x) => cityKey(x));
   const city = cityKey(center.name.split(",")[0]);

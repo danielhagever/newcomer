@@ -1,4 +1,4 @@
-// City lookup against 443 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 457 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL"
@@ -17,7 +17,7 @@ const FIX: Record<string, unknown[]> = Object.fromEntries(
 );
 const CASES: [string, string, string | null][] = JSON.parse(readFileSync(new URL("./geo-cases.json", import.meta.url), "utf8"));
 
-test("city lookup: 443 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 457 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -43,7 +43,7 @@ test("city lookup: 443 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 443);
+  assert.equal(CASES.length, 457);
   assert.deepEqual(wrong, []);
 });
 
@@ -83,6 +83,21 @@ test("100 places are asked for only when what follows the comma fits none of the
     counts.length = 0;
     await cityCenter(memoryKV().kv, new Budget(48), "Testville, Ohio");
     assert.deepEqual(counts, ["10"], "a region that fits is asked once");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("a territory's record has no country name: its own name labels it, and Hong Kong and Macau are also China", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ results: [{ name: "Testville", admin1: "Ilhas", country_code: "MO", population: 50000, feature_code: "PPLA", latitude: 22.2, longitude: 113.5 }, { name: "Testville", admin1: "Guangdong", country: "China", country_code: "CN", population: 900, feature_code: "PPL", latitude: 23, longitude: 113 }] }), { headers: { "content-type": "application/json" } })) as typeof fetch;
+  try {
+    const macau = await cityCenter(memoryKV().kv, new Budget(48), "Testville, Macau");
+    assert.equal(macau?.name, "Testville, Macau");
+    const china = await cityCenter(memoryKV().kv, new Budget(48), "Testville, China");
+    assert.equal(china?.name, "Testville, Macau", "Macau is China too; the bigger place wins");
+    assert.equal(china?.unmatched, undefined);
   } finally {
     globalThis.fetch = original;
   }

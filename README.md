@@ -94,7 +94,7 @@ A real run on 2026-10-03 (no personal data; the key is not shown anywhere).
 - Results are cached for a day per identical query to respect the event quota. A result where an optional step failed is shown but not cached.
 - Each address can run 20 new searches an hour, to protect the shared quota; asking again for an answer saved today doesn't count, unless the search is sent as free text, which the AI model reads again each time.
 - A city typed in Hebrew, Arabic or Cyrillic is found in its own language and then asked about in English; other scripts need the English name.
-- Common short city names (LA, NYC, Philly, NOLA, Vegas) and "City, State" with or without the space after the comma are understood; 443 ways of typing a city are in the tests.
+- Common short city names (LA, NYC, Philly, NOLA, Vegas) and "City, State" with or without the space after the comma are understood; 457 ways of typing a city are in the tests.
 
 ## Run it yourself
 
@@ -103,7 +103,7 @@ You need Node.js 22 or newer and a free Cloudflare account (Workers, KV and Work
 ```bash
 git clone https://github.com/danielhagever/newcomer && cd newcomer
 npm install
-npm test                                          # 123 tests against a mock Qloo shaped like the live API, no key needed
+npm test                                          # 125 tests against a mock Qloo shaped like the live API, no key needed
 npx wrangler login
 npx wrangler kv namespace create newcomer-cache   # put the id in wrangler.jsonc
 npx wrangler secret put QLOO_API_KEY             # your hackathon key, server-side only
