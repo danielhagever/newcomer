@@ -161,15 +161,18 @@ async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Reso
 
 // A taste (ramen, bouldering, jazz) can have a map variant (a genre) and a place variant (a cuisine,
 // an activity): Qloo lists the same name in many families, each with the entity types it applies to.
-const ROMANCE = new Set(["al", "alla", "alle", "allo", "del", "della", "delle", "dello", "de", "du", "des", "a", "à", "au", "aux", "la", "le", "les", "el", "los", "las"]);
+// (Accents are folded before the check: "à" is "a".)
+const ROMANCE = new Set(["al", "alla", "alle", "allo", "del", "della", "delle", "dello", "de", "du", "des", "a", "au", "aux", "la", "le", "les", "el", "los", "las"]);
 async function resolveTag(q: Qloo, it: Interest): Promise<Resolved | null> {
   // A note in brackets isn't a taste: "Moonsprout (indie rock band)" is not the Indie Rock genre.
   const text = withoutNote(term(it));
   // A dish's joining word is part of its name: "al pastor" is not the music genre "pastor" (live: Qloo's tag search for
-  // "al pastor" finds only pastor tags, and the genre moved Mexico City's map to the suburbs). A tag that isn't the
-  // exact name must keep every such word typed (the exact name does); English small words ("and", "the") may be left out.
-  const joins = typedName(text).split(" ").filter((w) => ROMANCE.has(w));
-  const list = (await q.tags(text, 20)).filter((t) => resembles(text, t.name) && joins.every((w) => typedName(t.name).split(" ").includes(w)));
+  // "al pastor" finds only pastor tags, and the genre moved Mexico City's map to the suburbs). A tag may leave such a
+  // word out only when two or more other words were typed, which it must then resemble ("al fresco dining" is Alfresco
+  // Dining, live); English small words ("and", "the") may be left out as before.
+  const typed = typedName(text).split(" ");
+  const keeps = (t: Tag) => typed.filter((w) => !ROMANCE.has(w)).length >= 2 || typed.every((w) => !ROMANCE.has(w) || typedName(t.name).split(" ").includes(w));
+  const list = (await q.tags(text, 20)).filter((t) => resembles(text, t.name) && keeps(t));
   if (!list.length) return null;
   // An exact name only counts if one of its tags can act (a media keyword alone can't); otherwise the
   // closest tag that can act is used, flagged as closest.
@@ -317,14 +320,17 @@ export async function matchNeighborhoods(
       const circle = { lat: center.lat, lon: center.lon, radiusM: 25000 };
       // The city-wide place lookups below go there too when Qloo's city was wrong, not when only its map was empty
       // (an empty map says nothing about the city: Mexico City's places then came from 25 km around, live).
-      if (heat.points.length) around = circle;
+      if (part || offBy > 50) around = circle;
       heat = await q.heatmap(mapSignals, circle);
       if (heat.points.length && medianKm(heat.points, center) > 50)
         throw new AppError(`Qloo's map didn't line up with ${center.name}, so no neighborhoods are shown. Try the city with its state or country.`, 502);
     }
     qlooCity = heat.locality?.name;
     trace.push({ step: "Heatmap", detail: `Qloo scored ${heat.points.length} map cells${qlooCity ? ` in ${qlooCity}` : ""} for this taste profile` });
-    if (!heat.points.length && !filterTags.length) throw new AppError(`Qloo has no taste map for ${center.name} with these interests.`, 404);
+    // Say what the map was asked with, so the person or agent knows what to change (live: "le tigre" and "LA punk" were
+    // music genres with no map there).
+    const used = resolved.filter((r) => r.use.includes("map")).map((r) => (normalizeName(r.as) === normalizeName(r.input) ? r.as : `${r.input} (as ${r.as})`));
+    if (!heat.points.length && !filterTags.length) throw new AppError(`Qloo has no taste map for ${center.name} with ${used.join(", ") || "these interests"}. Try an artist, show or film Qloo knows well.`, 404);
     if (!heat.points.length) mode = "places"; // no map for these signals, but the place tastes can still rank neighborhoods
   }
   if (mode === "map") {
@@ -387,6 +393,7 @@ export async function matchNeighborhoods(
     // Qloo can know a taste and have no places for it in the city (live: "oysters" in Boston): say so, not "try again".
     if (!found.length) throw new AppError(`Qloo has no places in ${center.name} for ${resolved.filter((r) => r.placeTag).map((r) => r.as).join(", ") || "these tastes"}. Try a nearby city or another taste.`, 404);
     hoods = rankByPlaces(found.filter(visitable), center); // closed or unvisitable places don't make an area
+    if (!hoods.length) throw new AppError(`Qloo's places in ${center.name} for ${resolved.filter((r) => r.placeTag).map((r) => r.as).join(", ") || "these tastes"} are closed, can't be visited or are too far out. Try another taste.`, 404);
     trace.push({ step: "Areas", detail: `Qloo found ${found.length} ${found.length === 1 ? "place that matches" : "places that match"} your food and activity tastes; grouped them by Qloo neighborhood` });
   }
 
@@ -467,7 +474,7 @@ export async function matchNeighborhoods(
         kept++;
       }
     }
-    trace.push({ step: "Your places", detail: `Qloo found ${cityMatches.length} places in the city that are one of your food or activity tastes; ${kept} are in the neighborhoods shown` });
+    trace.push({ step: "Your places", detail: `Qloo found ${cityMatches.length} ${cityMatches.length === 1 ? "place" : "places"} in the city that ${cityMatches.length === 1 ? "is" : "are"} one of your food or activity tastes; ${kept} ${kept === 1 ? "is" : "are"} in the neighborhoods shown` });
   }
   const dropped = dedupeEvidence(hoods);
   if (dropped) trace.push({ step: "Filter", detail: `Left out ${dropped} ${dropped === 1 ? "place" : "places"} a newcomer can't visit (schools, offices, places of worship, stations, airports, studios, closed places and the like)` });

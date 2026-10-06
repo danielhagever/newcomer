@@ -33,7 +33,7 @@ Without Qloo, an agent can only repeat what the internet says about neighborhood
 |---|---|---|
 | Resolve artists, shows, films… | `GET /search?query=<name>&types=urn:entity:<type>&take=5` | Turn words into Qloo entity IDs; exact name, or "closest" / "several share this name" with alternatives |
 | Resolve cuisines, activities, genres | `GET /v2/tags?filter.query=<word>&feature.semantic_search=true&take=20` | Turn words into Qloo tag IDs. The same word comes back in many tag families; each lists the entity types it applies to (`parents`). Music genres go on the map; cuisines and activities (parent `urn:entity:place`) pick places |
-| Where the taste concentrates | `GET /v2/insights?filter.type=urn:heatmap&filter.location.query=<located city>&signal.interests.entities=<ids>[&signal.interests.tags=<genres>]` | Every cell of the city with its affinity percentile, and the locality Qloo used. Same pattern as the `where_popular` workflow in Qloo's official harness (0.1.26). If Qloo's locality is far from the located city: `filter.location=POINT(lon lat)&filter.location.radius=25000` |
+| Where the taste concentrates | `GET /v2/insights?filter.type=urn:heatmap&filter.location.query=<located city>&signal.interests.entities=<ids>[&signal.interests.tags=<genres>]` | Every cell of the city with its affinity percentile, and the locality Qloo used. Same pattern as the `where_popular` workflow in Qloo's official harness (0.1.26). If Qloo's locality is far from the located city, is only a part of it (for "Tokyo, Japan": Minato), or its map is empty: `filter.location=POINT(lon lat)&filter.location.radius=25000` (the place searches follow it, except for an empty map) |
 | Taste places per neighborhood | `GET /v2/insights?filter.type=urn:entity:place&filter.location=POINT(lon lat)&filter.location.radius=1200&signal.interests.entities=<ids>&take=8` | Places people with your taste rate highly; their `properties.neighborhood` names the area, their time-of-day tags plan the weekend |
 | Your kinds of places | `GET /v2/insights?filter.type=urn:entity:place&filter.location.query=<city>&filter.tags=<cuisine/activity tags>&operator.filter.tags=union&signal.interests.entities=<ids>&take=50` | Ramen shops, bouldering gyms and natural wine bars, ranked by your taste |
 
@@ -103,7 +103,7 @@ You need Node.js 22 or newer and a free Cloudflare account (Workers, KV and Work
 ```bash
 git clone https://github.com/danielhagever/newcomer && cd newcomer
 npm install
-npm test                                          # 102 tests against a mock Qloo shaped like the live API, no key needed
+npm test                                          # 106 tests against a mock Qloo shaped like the live API, no key needed
 npx wrangler login
 npx wrangler kv namespace create newcomer-cache   # put the id in wrangler.jsonc
 npx wrangler secret put QLOO_API_KEY             # your hackathon key, server-side only

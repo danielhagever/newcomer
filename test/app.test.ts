@@ -202,6 +202,7 @@ test("the page re-sends not-found items with their English name and kind, and la
   assert.match(page, /d\.unresolved\.map\(\(name\) => \(d\.interests \|\| \[\]\)\.find\(\(x\) => x\.name === name\) \|\| \{ name \}\)/);
   assert.match(page, /\(d\.leftOut \|\| \[\]\)\.map\(\(name\) => asked\.find/);
   assert.match(page, /d\.mode === "map" \? "Ranking score/);
+  assert.match(page, /of the places that match your tastes \$\{h\.cells === 1 \? "is" : "are"\} here/); // "1 of the places ... is here" (live, Tokyo)
   // "Sunday around East Kent Avenue", not "Sunday in around ..." (live, Missoula).
   assert.match(page, /\$\{esc\(w\.day\)\} \$\{\/\^around \/\.test\(w\.neighborhood\) \? "" : "in "\}/);
 });

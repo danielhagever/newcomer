@@ -176,7 +176,7 @@ function render(d) {
   // Map mode: affinity is the mean percentile of the area's cells within the city.
   const score = (h) => d.mode === "map"
     ? `Map cells in its best area average in the top ${Math.max(1, Math.round((1 - h.affinity) * 100))}% of ${esc(d.city)} for this taste (Qloo affinity ${h.affinity.toFixed(2)}, ${h.cells} cells)${h.matches.length ? `; ${h.matches.length} of your kinds of places here` : ""}`
-    : `${h.cells} of the places that match your tastes are here`;
+    : `${h.cells} of the places that match your tastes ${h.cells === 1 ? "is" : "are"} here`;
   const place = (e) => `<div class="ev"><b>${esc(e.name)}</b>${e.address ? ` <span class="m">· ${esc(e.address)}</span>` : ""}<div>${(e.tags || []).slice(0, 3).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div></div>`;
   const hoods = d.neighborhoods.map((h, i) => `
     <div class="hood" role="button" tabindex="0" aria-label="Show ${esc(h.name)} on the map" data-lat="${h.lat}" data-lon="${h.lon}">
