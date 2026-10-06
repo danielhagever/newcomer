@@ -11,7 +11,7 @@ export interface Call {
   params: URLSearchParams;
 }
 
-export type Handler = (c: Call) => { status?: number; body: unknown } | undefined;
+export type Handler = (c: Call) => { status?: number; body: unknown; headers?: Record<string, string> } | undefined;
 
 export function mockFetch(handler: Handler) {
   const calls: Call[] = [];
@@ -22,7 +22,7 @@ export function mockFetch(handler: Handler) {
     calls.push(c);
     const r = handler(c) ?? defaults(c);
     if (!r) return new Response("not mocked", { status: 599 });
-    return new Response(JSON.stringify(r.body), { status: r.status ?? 200, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify(r.body), { status: r.status ?? 200, headers: { "content-type": "application/json", ...(r.headers ?? {}) } });
   }) as typeof fetch;
   return { calls, restore: () => (globalThis.fetch = original) };
 }

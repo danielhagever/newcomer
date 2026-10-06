@@ -103,7 +103,7 @@ You need Node.js 22 or newer and a free Cloudflare account (Workers, KV and Work
 ```bash
 git clone https://github.com/danielhagever/newcomer && cd newcomer
 npm install
-npm test                                          # 125 tests against a mock Qloo shaped like the live API, no key needed
+npm test                                          # 126 tests against a mock Qloo shaped like the live API, no key needed
 npx wrangler login
 npx wrangler kv namespace create newcomer-cache   # put the id in wrangler.jsonc
 npx wrangler secret put QLOO_API_KEY             # your hackathon key, server-side only

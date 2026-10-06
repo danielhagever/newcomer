@@ -140,6 +140,10 @@ export class Qloo {
       ? body.results.length
       : (body?.results?.entities?.length ?? body?.results?.heatmap?.length ?? body?.results?.tags?.length ?? 0);
     this.calls.push({ path, params, status: res.status, ms: Date.now() - t, count });
+    // The key's calls for the month can run out too (live 2026-10-06: x-month-ratelimit-remaining 0, 10,000 a month):
+    // then waiting a minute won't help, and the answer says so instead of "try again in a minute".
+    if (res.status === 429 && res.headers.get("x-month-ratelimit-remaining") === "0")
+      throw new QlooError("This demo has used all of its Qloo API calls for the month, so no new search can run until Qloo's monthly limit resets. Saved answers from the last day still work.", 503);
     if (res.status === 429 && retry && this.budget.left() > 1) {
       await new Promise((r) => setTimeout(r, 800));
       return this.get(path, params, false, timeoutMs);
