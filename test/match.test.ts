@@ -775,7 +775,7 @@ test("with only food and activity tastes, a part of the city is asked again arou
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]);
     assert.equal(r.mode, "places");
     const cityWide = m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags"));
-    assert.deepEqual(cityWide.map((c) => !!c.params.get("filter.location.radius")), [false, true]);
+    assert.deepEqual(cityWide.map((c) => c.params.get("filter.location.radius")), [null, "25000"], "a part is asked for 25 km, as the map is");
     assert.ok(r.trace.some((t) => /was only Hyde Park, a part of it/.test(t.detail)));
     assert.equal(r.qlooCity, undefined, "the part isn't shown as the city (live: Minato)");
     assert.ok(r.trace.some((t) => t.detail.startsWith("Qloo found 1 place that matches your food and activity tastes")), "one place, said so (Kyoto, live: \"1 places\")");
@@ -816,8 +816,8 @@ test("a place search that finds nothing by the city's name is asked again around
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]);
     assert.equal(r.mode, "places");
-    assert.deepEqual(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags")).map((c) => !!c.params.get("filter.location.radius")), [false, true]);
-    assert.ok(r.trace.some((t) => t.detail === `Qloo's area for "Austin, Texas" had none of these places (read as Trade Fair Austin); asked again for 25 km around the city centre`), JSON.stringify(r.trace));
+    assert.deepEqual(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags")).map((c) => c.params.get("filter.location.radius")), [null, "10000"], "as far as Austin's 960,000 people reach");
+    assert.ok(r.trace.some((t) => t.detail === `Qloo's area for "Austin, Texas" had none of these places (read as Trade Fair Austin); asked again for 10 km around the city centre`), JSON.stringify(r.trace));
     assert.equal(r.qlooCity, undefined);
     assert.ok(r.neighborhoods.length);
   } finally {
@@ -828,8 +828,8 @@ test("a place search that finds nothing by the city's name is asked again around
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
     assert.equal(r.mode, "map");
-    assert.deepEqual(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags") && !c.params.get("filter.location.radius")?.match(/^1[0-9]{3}$/)).map((c) => c.params.get("filter.location.radius")), [null, "25000"]);
-    assert.ok(r.trace.some((t) => t.detail === `Qloo found none of your kinds of places for "Austin, Texas" by its name; asked again for 25 km around the city centre`));
+    assert.deepEqual(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags") && !c.params.get("filter.location.radius")?.match(/^1[0-9]{3}$/)).map((c) => c.params.get("filter.location.radius")), [null, "10000"]);
+    assert.ok(r.trace.some((t) => t.detail === `Qloo found none of your kinds of places for "Austin, Texas" by its name; asked again for 10 km around the city centre`));
     assert.ok(r.trace.some((t) => /^Qloo found 1 place in the city that is one of your food or activity tastes/.test(t.detail)), JSON.stringify(r.trace));
   } finally {
     m.restore();
@@ -930,9 +930,42 @@ test("a city read as its centre's council finds nothing by name and is asked aga
   );
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
-    assert.ok(r.trace.some((t) => t.detail === `Qloo found none of your kinds of places for "Austin, Texas" by its name; asked again for 25 km around the city centre`), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(r.trace.some((t) => t.detail === `Qloo found none of your kinds of places for "Austin, Texas" by its name; asked again for 10 km around the city centre`), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     map.restore();
+  }
+});
+
+test("St and Saint are one name to the city rules (live: Qloo's \"Saint Petersburg\" for Open-Meteo's \"St Petersburg\")", async () => {
+  const geo = (c: Call) => (c.host === "geocoding-api.open-meteo.com" ? { body: { results: [{ ...AUSTIN, name: "St. Augustine", admin1: "Florida" }] } } : undefined);
+  // A part of the city whose description spells it "Saint" is still a part, asked again around the centre.
+  const part = "Old Town, Saint Augustine, St. Johns County, Florida, United States";
+  let m = mockFetch((c) => geo(c) ?? standardQloo({ heat: (h) => (h.params.get("filter.location.query") ? heatmap(AUSTIN.latitude, AUSTIN.longitude, 9, 8, part) : undefined) })(c));
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "St. Augustine, Florida", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.equal(m.calls.filter(isHeat).length, 2);
+    assert.ok(r.trace.some((t) => t.detail.includes("was only Old Town, a part of it")), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
+  }
+  // An area Qloo files under the city's own name, spelled "Saint", isn't named after the city.
+  m = mockFetch((c) => geo(c) ?? standardQloo({ hood: () => "Saint Augustine" })(c));
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "St. Augustine, Florida", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.ok(!r.neighborhoods.some((h) => h.name === "Saint Augustine"), JSON.stringify(r.neighborhoods.map((h) => h.name)));
+  } finally {
+    m.restore();
+  }
+});
+
+test("your kinds of places that Qloo lists but can't be used are said so, not called none", async () => {
+  const closed = { ...place("x", "CLOSED - Ramen X", "Downtown", 30.27, -97.74, ["Ramen restaurant"], ["Evening"]) };
+  const m = mockFetch((c) => (isPlaces(c) && c.params.get("filter.tags") ? { body: { results: { entities: [closed] } } } : standardQloo()(c)));
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
+    assert.ok(r.trace.some((t) => t.detail === "Qloo's place in the city for Ramen is closed, can't be visited or has no location; the areas come from the map alone"), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
   }
 });
 

@@ -19,7 +19,7 @@ Newcomer answers a personal question with evidence: **where in this city do the 
 5. **Plans a scouting weekend.** Saturday in the best match and Sunday in the runner-up: one place per part of the day, using Qloo's own time-of-day fit for each place.
 6. **Shows its work.** A "How we know" panel lists every Qloo call with its parameters (the key never leaves the server), status, result count and time, then Newcomer's own rules, then the limits of the result.
 
-With only food and activity tastes, there is nothing for Qloo's heatmap to use, so Newcomer ranks neighborhoods by where the matching places are, and says so. Qloo's city is checked as the map's is (only a part of the city, or over 50 km away, is asked again for 25 km around the centre, and so is a place search that finds nothing where Qloo read the city as something named after it: "Moscow, Russia" is Trade Fair Moscow to Qloo, "Perth, Australia" the City of Perth council; a city read as itself with nothing found says so rather than listing its neighbours), and a place over 40 km from the centre makes no area.
+With only food and activity tastes, there is nothing for Qloo's heatmap to use, so Newcomer ranks neighborhoods by where the matching places are, and says so. Qloo's city is checked as the map's is (only a part of the city, or over 50 km away, is asked again for 25 km around the centre, and a place search that finds nothing where Qloo read the city as something named after it is asked again as far as the city reaches, from its population: "Moscow, Russia" is Trade Fair Moscow to Qloo, "Perth, Australia" the City of Perth council; Napa County stays within Napa, so it says Qloo has no places there rather than listing Fairfield's), and a place over 40 km from the centre makes no area.
 
 It works as a web app and as an **MCP tool** (`find_neighborhoods`) that an agent can call (see below).
 
@@ -94,7 +94,7 @@ A real run on 2026-10-03 (no personal data; the key is not shown anywhere).
 - Results are cached for a day per identical query to respect the event quota. A result where an optional step failed is shown but not cached.
 - Each address can run 20 new searches an hour, to protect the shared quota; asking again for an answer saved today doesn't count, unless the search is sent as free text, which the AI model reads again each time.
 - A city typed in Hebrew, Arabic or Cyrillic is found in its own language and then asked about in English; other scripts need the English name.
-- Common short city names (LA, NYC, Philly, NOLA, Vegas) and "City, State" with or without the space after the comma are understood; 432 ways of typing a city are in the tests.
+- Common short city names (LA, NYC, Philly, NOLA, Vegas) and "City, State" with or without the space after the comma are understood; 443 ways of typing a city are in the tests.
 
 ## Run it yourself
 
@@ -103,7 +103,7 @@ You need Node.js 22 or newer and a free Cloudflare account (Workers, KV and Work
 ```bash
 git clone https://github.com/danielhagever/newcomer && cd newcomer
 npm install
-npm test                                          # 121 tests against a mock Qloo shaped like the live API, no key needed
+npm test                                          # 123 tests against a mock Qloo shaped like the live API, no key needed
 npx wrangler login
 npx wrangler kv namespace create newcomer-cache   # put the id in wrangler.jsonc
 npx wrangler secret put QLOO_API_KEY             # your hackathon key, server-side only

@@ -331,7 +331,7 @@ export async function matchNeighborhoods(
 
   let heat: Awaited<ReturnType<Qloo["heatmap"]>> = { points: [] };
   let cityMatches: Entity[] = [];
-  let kindsAnswered = false; // Qloo answered the search for your kinds of places (it may have found none)
+  let kindsFound: number | undefined; // how many places Qloo's search for your kinds of places answered (when it did)
   let around: Where = { query: center.query }; // where the city is: asked by name, or around its centre once that proved wrong
   let byName: Locality | undefined; // how Qloo read the city's name for the map
   if (mode === "map") {
@@ -379,11 +379,12 @@ export async function matchNeighborhoods(
         // there is asked again around the centre; nothing found in a city read as itself stays nothing (live: 25 km
         // around Hoboken listed Astoria and Carroll Gardens).
         if (!mine.length && "query" in around && notTheCity(byName, center)) {
-          trace.push({ step: "Check", detail: `Qloo found none of your kinds of places for "${center.query}" by its name; asked again for 25 km around the city centre` });
-          mine = await q.places(placeSignals, { lat: center.lat, lon: center.lon, radiusM: 25000 }, 50, filterTags);
+          const r = cityRadiusKm(center.population);
+          trace.push({ step: "Check", detail: `Qloo found none of your kinds of places for "${center.query}" by its name; asked again for ${r} km around the city centre` });
+          mine = await q.places(placeSignals, { lat: center.lat, lon: center.lon, radiusM: r * 1000 }, 50, filterTags);
         }
         cityMatches = mine.filter((p) => p.lat !== undefined && p.lon !== undefined && visitable(p));
-        kindsAnswered = true;
+        kindsFound = mine.length;
       } catch {
         degraded = true;
       }
@@ -431,8 +432,11 @@ export async function matchNeighborhoods(
     // nothing found stays a 404 (25 km around Hoboken, with nothing in it, listed New York's neighborhoods, live).
     if (part || offBy > 50 || (!found.length && "query" in around && notTheCity(locality, center))) {
       const wrong = offBy > 50 ? `was ${Math.round(offBy)} km from the located city` : part ? `was only ${part}, a part of it` : `had none of these places${locality ? ` (read as ${locality.name.split(",")[0]})` : ""}`;
-      trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" ${wrong}; asked again for 25 km around the city centre` });
-      around = { lat: center.lat, lon: center.lon, radiusM: 25000 };
+      // An empty search is widened only as far as the city reaches (its population: Napa 3 km, Perth and Moscow 25), so a
+      // county named after it doesn't bring in its neighbours (live: Napa County's ramen were in Fairfield and Vallejo).
+      const radiusKm = part || offBy > 50 ? 25 : cityRadiusKm(center.population);
+      trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" ${wrong}; asked again for ${radiusKm} km around the city centre` });
+      around = { lat: center.lat, lon: center.lon, radiusM: radiusKm * 1000 };
       qlooCity = undefined; // the part isn't the city (live: "Qloo read the city as Minato, Tokyo, ...")
       found = await q.places(placeSignals, around, 50, filterTags);
     }
@@ -449,9 +453,10 @@ export async function matchNeighborhoods(
   // (live: a ferry terminal Qloo files under Manhattan's "Whitehall" named a Brooklyn square). A neighborhood named like
   // the city itself ("Brooklyn" in Brooklyn) or a ward number ("Ward 2", Qloo's name for the National Mall) says
   // nothing; skip it.
-  const cityWords = new Set([center.name.split(",")[0], qlooCity?.split(",")[0] ?? ""].map(nameKey).filter(Boolean));
+  // Compared as city names: "Saint Petersburg" is Open-Meteo's "St Petersburg" (live: an area was named after the city).
+  const cityWords = new Set([center.name.split(",")[0], qlooCity?.split(",")[0] ?? ""].map(cityKey).filter(Boolean));
   // Nor an electoral district ("University\u2014Rosedale", Qloo's names in Toronto, join two places with a dash).
-  const says = (n: string | undefined): n is string => !!n && !cityWords.has(nameKey(n)) && !/^ward \d+$/i.test(n.trim()) && !/\S\u2014\S/.test(n);
+  const says = (n: string | undefined): n is string => !!n && !cityWords.has(cityKey(n)) && !/^ward \d+$/i.test(n.trim()) && !/\S\u2014\S/.test(n);
   const step = areaStep(cellLength(heat.points));
   const inSquare = (h: Neighborhood, e: Entity) => !step || (e.lat !== undefined && e.lon !== undefined && Math.floor(e.lat / step) === Math.floor(h.lat / step) && Math.floor(e.lon / step) === Math.floor(h.lon / step));
   // A Japanese block number after a name is an address, not a neighborhood ("Ginza 8-chome" and "Ginza 2-chome" are
@@ -486,14 +491,14 @@ export async function matchNeighborhoods(
   const northAmerica = center.country ? center.country === "US" || center.country === "CA" : /\b(United States|Canada)\b/.test(heat.locality?.name ?? qlooCity ?? "");
   const centreName = northAmerica ? `Downtown ${cityName}` : `${cityName} city centre`;
   const atCentre = (h: Neighborhood, ps: Entity[]) =>
-    km(h, center) <= 1.5 && cityWords.has(nameKey(mostCommon(ps.filter(visitable).map((e) => e.neighborhood).filter((n): n is string => !!n).map(clean)) ?? ""));
+    km(h, center) <= 1.5 && cityWords.has(cityKey(mostCommon(ps.filter(visitable).map((e) => e.neighborhood).filter((n): n is string => !!n).map(clean)) ?? ""));
   for (const h of hoods) {
     if (h.name) continue;
     const inside = [...h.evidence, ...h.matches].filter((e) => inSquare(h, e));
     h.name = atCentre(h, inside) ? centreName : byPlaces(inside);
   }
   // An area Qloo grouped under the city's own name at its centre is the city centre too (places mode: Melbourne's CBD).
-  for (const h of hoods) h.name = says(h.name) ? clean(h.name) : h.name && cityWords.has(nameKey(clean(h.name))) && km(h, center) <= 1.5 ? centreName : "";
+  for (const h of hoods) h.name = says(h.name) ? clean(h.name) : h.name && cityWords.has(cityKey(clean(h.name))) && km(h, center) <= 1.5 ? centreName : "";
   const unnamed = hoods.filter((h) => !h.name);
   if (unnamed.length) {
     const r = await namesFor(env.CACHE, budget, center.name, unnamed, 3);
@@ -524,9 +529,16 @@ export async function matchNeighborhoods(
       }
     }
     trace.push({ step: "Your places", detail: `Qloo found ${cityMatches.length} ${cityMatches.length === 1 ? "place" : "places"} in the city that ${cityMatches.length === 1 ? "is" : "are"} one of your food or activity tastes; ${kept} ${kept === 1 ? "is" : "are"} in the neighborhoods shown` });
-  } else if (mode === "map" && kindsAnswered)
+  } else if (mode === "map" && kindsFound !== undefined) {
     // Said, not dropped silently (live: Perth's coffee found nothing in the city's centre council).
-    trace.push({ step: "Your places", detail: `Qloo found no places in the city for ${resolved.filter((r) => r.placeTag).map((r) => r.as).join(", ")}; the areas come from the map alone` });
+    const tastes = resolved.filter((r) => r.placeTag).map((r) => r.as).join(", ");
+    trace.push({
+      step: "Your places",
+      detail: kindsFound
+        ? `Qloo's ${kindsFound === 1 ? "place" : "places"} in the city for ${tastes} ${kindsFound === 1 ? "is" : "are"} closed, can't be visited or ${kindsFound === 1 ? "has" : "have"} no location; the areas come from the map alone`
+        : `Qloo found no places in the city for ${tastes}; the areas come from the map alone`,
+    });
+  }
   const dropped = dedupeEvidence(hoods);
   if (dropped) trace.push({ step: "Filter", detail: `Left out ${dropped} ${dropped === 1 ? "place" : "places"} a newcomer can't visit (schools, offices, places of worship, stations, airports, studios, closed places and the like)` });
 
@@ -568,6 +580,14 @@ export async function matchNeighborhoods(
   };
 }
 
+// How far a circle around a city's centre reaches to cover the city: a disc holding its people at about 3,000 per km²,
+// from 3 to 25 km (Booker's rule; Napa 3 km, Perth and Moscow 25). Unknown population: 3 km.
+const cityRadiusKm = (population?: number) => Math.min(25, Math.max(3, Math.round(Math.sqrt((population ?? 0) / 3000 / Math.PI))));
+
+// A place name for comparing cities: accents and case don't count, nor "St" for "Saint" (live: Open-Meteo's "St
+// Petersburg" is "Saint Petersburg" to Qloo).
+const cityKey = (s: string) => placeKey(s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")).replace(/\bst\b/g, "saint").replace(/\bste\b/g, "sainte");
+
 // Qloo can answer a city asked by name with a part of it: for "Tokyo, Japan" its locality is Minato ("Minato, Tokyo,
 // ...", one ward, 6 km across; measured on 35 cities, the only one then; later "London, Ontario" as Wortley Village).
 // A locality named after the city is the city or bigger ("Paris Police Prefecture", "Região Geográfica Intermediária de
@@ -587,8 +607,8 @@ function insideCity(locality: Locality | undefined, center: { name: string }, ce
 // Moscow), or the city or more under another name (São Paulo's region, Bogotá's capital district). Asked after
 // partOfCity. Its name, else null.
 function namedInside(locality: Locality | undefined, center: { name: string }): string | null {
-  const [own, ...within] = (locality?.name ?? "").split(",").map((x) => nameKey(x));
-  const city = nameKey(center.name.split(",")[0]);
+  const [own, ...within] = (locality?.name ?? "").split(",").map((x) => cityKey(x));
+  const city = cityKey(center.name.split(",")[0]);
   return own !== city && within.includes(city) ? locality!.name.split(",")[0].trim() : null;
 }
 
@@ -597,14 +617,14 @@ function namedInside(locality: Locality | undefined, center: { name: string }): 
 // nothing there is asked again around the centre; a city read as itself (Hoboken) isn't. (A part of the city named
 // otherwise was already asked around its centre.) Its name, else null.
 function notTheCity(locality: Locality | undefined, center: { name: string }): string | null {
-  const own = nameKey((locality?.name ?? "").split(",")[0]);
-  const city = nameKey(center.name.split(",")[0]);
+  const own = cityKey((locality?.name ?? "").split(",")[0]);
+  const city = cityKey(center.name.split(",")[0]);
   return own !== city && own.includes(city) ? locality!.name.split(",")[0].trim() : null;
 }
 
 function partOfCity(locality: Locality | undefined, center: { name: string }): string | null {
-  const [own, ...within] = (locality?.name ?? "").split(",").map((x) => nameKey(x));
-  const city = nameKey(center.name.split(",")[0]);
+  const [own, ...within] = (locality?.name ?? "").split(",").map((x) => cityKey(x));
+  const city = cityKey(center.name.split(",")[0]);
   return !own.includes(city) && within.includes(city) ? locality!.name.split(",")[0].trim() : null;
 }
 
