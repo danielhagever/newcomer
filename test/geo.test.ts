@@ -1,4 +1,4 @@
-// City lookup against 641 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 652 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
@@ -12,8 +12,11 @@
 // that name: a Hamilton in Rhode Island, another country, flagged), "Arlington, NoVA" ("Nova" is in Nova Scotia),
 // "Union City, North Jersey" and "Halifax, West Yorkshire" (filed under Calderdale), flagged; one-letter directions
 // ("Charleston, W. Virginia"), a direction as its own part ("Naples, SW, Florida"), a country in brackets or after a
-// slash ("Portland, Maine (USA)", "Portland, ME/USA"), "Bethlehem, West Bank", and airports the geocoder files under
-// the typed name ("Raleigh-Durham, NC", "Dallas/Fort Worth")
+// "Bethlehem, West Bank", airports the geocoder files under the typed name ("Raleigh-Durham, NC", "Dallas/Fort
+// Worth"), "Laayoune, Morocco", "Dakhla, Morocco" and "Bethlehem, Israel" (the geocoder files the cities under Western
+// Sahara and Palestine: a village of the name fits the typed country), a city, state and country with no commas
+// ("Salem MA USA"), and a region with a direction or county before its country with no comma ("Vernon, Okanagan
+// Canada")
 // (Oahu, Kauai, Big Island and "Newcastle, UK/England" are now aliases in city.ts); and the ambiguous bare names
 // Newcastle, Victoria, Hong Kong, St Andrews, St Malo / Saint Malo (Manitoba, or a French village: Open-Meteo
 // gives Saint-Malo itself no population), Prince Edward Island. Run: npm test
@@ -29,7 +32,7 @@ const FIX: Record<string, unknown[]> = Object.fromEntries(
 );
 const CASES: [string, string, string | null][] = JSON.parse(readFileSync(new URL("./geo-cases.json", import.meta.url), "utf8"));
 
-test("city lookup: 641 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 652 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -55,7 +58,7 @@ test("city lookup: 641 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 641);
+  assert.equal(CASES.length, 652);
   assert.deepEqual(wrong, []);
 });
 

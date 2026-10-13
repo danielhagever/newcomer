@@ -177,7 +177,7 @@ const US_STATE_NAMES = new Set(Object.values(US_STATES).map(regionWords));
 // direction before a state stays one ("NE Ohio" is northeast Ohio, not Nebraska and Ohio: only a country can follow).
 const splitRegion = (part: string): string[] => {
   const ws = part.split(/\s+/);
-  for (let k = 1; k <= 3 && k < ws.length; k++) {
+  for (let k = 1; k <= 2 && k < ws.length; k++) {
     const head = ws.slice(0, -k).join(" ");
     const tail = ws.slice(-k).join(" ");
     if (KNOWN_REGIONS.has(fold(head)) && COUNTRIES.has(fold(tail))) return [head, tail];
@@ -256,13 +256,21 @@ function respellings(name: string, nordic: boolean, turkish: boolean): string[] 
 }
 
 export async function cityCenter(cache: KVNamespace, budget: Budget, city: string): Promise<Place | null> {
-  const key = `city26:${city.toLowerCase()}`; // city26: parts cleaned first, "MA USA" split, Palestine and Western Sahara
+  const key = `city27:${city.toLowerCase()}`; // city27: signs in a region are spaces, nicknames with further parts
   const hit = await kvGet(cache, budget, key);
   if (hit) return hit as Place;
   // The typed parts, cleaned once before any step reads them: "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK";
-  // a part that folds to nothing ("Venice,.", "Newcastle, UK,") is left out; "MA USA" is two parts.
-  const cleaned = city.split(",").map((x) => x.trim()).filter((x) => fold(x)).flatMap((x, i) => (i ? splitRegion(x) : [x])).join(", ");
-  const typed = (ALIASES[fold(cleaned)] ?? cleaned).replace(/[\u2018\u2019]/g, "'");
+  // in a region, signs other than dots, hyphens and apostrophes are spaces ("NC?", "Maine (USA)", "ME/USA"); a part with
+  // no letter or digit is left out ("Venice,.", "Venice, -"); "MA USA" is two parts.
+  const typedList = city
+    .split(",")
+    .map((x, i) => (i ? x.replace(/[^\p{L}\p{N}\s.'\u2019-]/gu, " ") : x).replace(/\s+/g, " ").trim())
+    .filter((x) => /[\p{L}\p{N}]/u.test(x))
+    .flatMap((x, i) => (i ? splitRegion(x) : [x]));
+  // A nickname typed with its region, then any further parts ("Newcastle, England, UK" is Newcastle upon Tyne). A name
+  // alone is a nickname further down, where the typed region wins ("KC, Kansas" is Kansas City, Kansas).
+  const alias = typedList.length > 1 ? ALIASES[fold(typedList.slice(0, 2).join(", "))] : undefined;
+  const typed = (alias ? [alias, ...typedList.slice(2)] : typedList).join(", ").replace(/[\u2018\u2019]/g, "'");
   let [name, ...rest] = typed.split(",").map((x) => x.trim());
   if (!name) return null;
   // A nickname before the comma too: "Quebec City, QC", "Bangalore, India", "Washington DC, USA" (and, below,

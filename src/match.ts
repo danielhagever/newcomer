@@ -366,7 +366,7 @@ export async function matchNeighborhoods(
         throw new AppError(`Qloo's map didn't line up with ${center.name}, so no neighborhoods are shown. Try the city with its state or country.`, 502);
     }
     qlooCity = heat.locality?.name;
-    trace.push({ step: "Heatmap", detail: `Qloo scored ${heat.points.length} map cells${qlooCity ? ` in ${qlooCity}` : ""} for this taste profile` });
+    trace.push({ step: "Heatmap", detail: `Qloo scored ${heat.points.length} map ${heat.points.length === 1 ? "cell" : "cells"}${qlooCity ? ` in ${qlooCity}` : ""} for this taste profile` });
     // Say what the map was asked with, so the person or agent knows what to change (live: "le tigre" and "LA punk" were
     // music genres with no map there).
     const used = resolved.filter((r) => r.use.includes("map")).map((r) => (normalizeName(r.as) === normalizeName(r.input) ? r.as : `${r.input} (as ${r.as})`));
@@ -493,20 +493,21 @@ export async function matchNeighborhoods(
     hoods = hoods.filter((h) => !airport(h));
     trace.push({ step: "Filter", detail: `Left out ${atAirports} area${atAirports === 1 ? "" : "s"} at an airport` });
   }
-  // Judged by the places inside the area's own square, as its name is: the places within 1.2 km reach across a border
-  // the area itself doesn't (live: Beausoleil's square is in France, its places within reach in Monaco).
+  // Judged by all the places within reach, not only those inside the area's own square: one place there decided
+  // (pass 51: Juárez's top area became El Paso's riverside for the bridge in it; Windsor lost its riverfront to
+  // Detroit's Renaissance Center). Beausoleil, whose places within reach are all Monaco's, is a known limit.
   const placesAbroad = (h: Neighborhood) => {
-    const ps = [...h.evidence, ...h.matches].filter((e) => inSquare(h, e));
+    const ps = [...h.evidence, ...h.matches];
     return ps.filter((e) => !home(e)).length * 2 > ps.length;
   };
   const across = hoods.filter(placesAbroad);
   if (across.length) {
     hoods = hoods.filter((h) => !placesAbroad(h));
-    const where = [...new Set(across.flatMap((h) => [...h.evidence, ...h.matches].filter((e) => inSquare(h, e) && !home(e)).map((e) => countryName(e.countryCode!))))].join(" and ");
+    const where = [...new Set(across.flatMap((h) => [...h.evidence, ...h.matches].filter((e) => !home(e)).map((e) => countryName(e.countryCode!))))].join(" and ");
     const its = across.length === 1 ? "its" : "their";
-    trace.push({ step: "Filter", detail: `Left out ${across.length} area${across.length === 1 ? "" : "s"} across the border (Qloo files ${its} places in ${where})` });
+    trace.push({ step: "Filter", detail: `Left out ${across.length} area${across.length === 1 ? "" : "s"} across the border (Qloo files ${its} places in another country: ${where})` });
     // Not "try again later": every area Qloo ranks is another country's, which asking again won't change.
-    if (!hoods.length) throw new AppError(`The ${across.length === 1 ? "area" : "areas"} Qloo ranks highest around ${center.name} for these tastes ${across.length === 1 ? "is" : "are all"} across the border (Qloo files ${its} places in ${where}), so none is shown as the city's. Try a nearby city or other tastes.`, 404);
+    if (!hoods.length) throw new AppError(`The ${across.length === 1 ? "area" : "areas"} Qloo ranks highest around ${center.name} for these tastes ${across.length === 1 ? "is" : "are all"} across the border (Qloo files ${its} places in another country: ${where}), so none is shown as the city's. Try a nearby city or other tastes.`, 404);
   }
   for (const h of hoods) (h.evidence = h.evidence.filter(home)), (h.matches = h.matches.filter(home));
   // Where Qloo files most places inside an area under the city's own name and the area is at the city's centre, it is
