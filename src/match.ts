@@ -11,7 +11,8 @@
 import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type Locality, type QlooEnv, type Signals, type Tag, type Where } from "./qloo.ts";
 import { forSearch, nameKey as typedName, rankNames, resembles, together, withoutNote } from "./names.ts";
 export { resembles };
-import { cityCenter, cellKey, km, namesFor } from "./geo.ts";
+import { cityCenter, km } from "./city.ts";
+import { cellKey, namesFor } from "./geo.ts";
 import { AppError, type Budget } from "./limits.ts";
 
 export type Kind = "artist" | "movie" | "tv_show" | "book" | "podcast" | "video_game" | "brand" | "place" | "tag";

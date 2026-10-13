@@ -4,13 +4,13 @@
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
 // "Windsor, Berkshire" (filed under Windsor and Maidenhead: Windsor, Ontario, flagged), "Derry, Ireland" (filed as
 // Londonderry), "Lorenskog" (no Lørenskog at all)
-// (Oahu, Kauai, Big Island and "Newcastle, UK/England" are now aliases in geo.ts); and the ambiguous bare names
+// (Oahu, Kauai, Big Island and "Newcastle, UK/England" are now aliases in city.ts); and the ambiguous bare names
 // Newcastle, Victoria, Hong Kong, St Andrews, St Malo / Saint Malo (Manitoba, or a French village: Open-Meteo
 // gives Saint-Malo itself no population), Prince Edward Island. Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { cityCenter } from "../src/geo.ts";
+import { cityCenter } from "../src/city.ts";
 import { Budget } from "../src/limits.ts";
 import { memoryKV } from "./mock.ts";
 

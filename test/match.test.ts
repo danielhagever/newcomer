@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { matchNeighborhoods, planDay, rankAreas, resembles, samePlace } from "../src/match.ts";
 import { Qloo, signalParams } from "../src/qloo.ts";
-import { cityCenter, km } from "../src/geo.ts";
+import { cityCenter, km } from "../src/city.ts";
 import { AppError, Budget } from "../src/limits.ts";
 import { AUSTIN, ENV, heatmap, memoryKV, mockFetch, place, places, tag, type Call } from "./mock.ts";
 

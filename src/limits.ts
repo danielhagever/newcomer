@@ -32,6 +32,9 @@ export class Budget {
 // 50 is the platform limit; keep a little room.
 export const REQUEST_BUDGET = 48;
 
+// How this app introduces itself to the free geocoders.
+export const UA = { "user-agent": "Newcomer/0.2 (Qloo hackathon demo; github.com/danielhagever/newcomer)" };
+
 export async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
   return fetch(url, { ...init, signal: AbortSignal.timeout(ms) });
 }
