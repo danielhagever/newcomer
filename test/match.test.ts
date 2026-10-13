@@ -487,6 +487,27 @@ test("only the country acts: an area whose places Qloo files mostly abroad is le
   }
   // Your kinds of places abroad are never listed, whether they rank the areas (food only) or go under the map's areas.
   const ramen = [filed(place("r1", "Ramen Abroad", "Centro Juarez", 30.27, -97.74, ["Ramen restaurant"], ["Evening"]), "MX"), filed(place("r2", "Ramen Home", "Downtown", 30.268, -97.742, ["Ramen restaurant"], ["Evening"]), "US"), filed(place("r3", "Ramen Two", "Downtown", 30.269, -97.741, ["Ramen restaurant"], ["Evening"]), "US")];
+  // A territory is its country's: San Juan's places filed as the US stay (Qloo files Puerto Rico as the US, live); a city
+  // with no country keeps every place; and when every area is abroad the search says so, not "try again later".
+  const sanJuan = { ...AUSTIN, name: "San Juan", admin1: "San Juan", country: undefined, country_code: "PR" };
+  const noCountry = { ...AUSTIN, country: undefined, country_code: undefined };
+  for (const [what, record, code, ok] of [["San Juan", sanJuan, "US", true], ["no country", noCountry, "MX", true], ["all abroad", AUSTIN, "MX", false]] as const) {
+    const g = mockFetch((c) => {
+      if (c.host === "geocoding-api.open-meteo.com") return { body: { results: [record] } };
+      if (isPlaces(c) && !c.params.get("filter.tags")) {
+        const p = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+        return { body: { results: { entities: [filed(place(`q${p[2]}`, "Filed Bar", "Somewhere", +p[2], +p[1], ["Bar"], ["Evening"]), code)] } } };
+      }
+      return standardQloo()(c);
+    });
+    try {
+      const search = matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+      if (ok) assert.ok((await search).neighborhoods.length > 0, what);
+      else await assert.rejects(search, (e: AppError) => e.status === 404 && /are all across the border \(Qloo files their places in MX\)/.test(e.message), what);
+    } finally {
+      g.restore();
+    }
+  }
   for (const interests of [[{ name: "ramen", kind: "tag" }], [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]] as Interest[][]) {
     const r2 = mockFetch((c) => (isPlaces(c) && c.params.get("filter.tags") ? { body: { results: { entities: ramen } } } : standardQloo()(c)));
     try {
@@ -1032,7 +1053,7 @@ test("your kinds of places that Qloo lists but can't be used are said so, not ca
   const m = mockFetch((c) => (isPlaces(c) && c.params.get("filter.tags") ? { body: { results: { entities: [closed] } } } : standardQloo()(c)));
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
-    assert.ok(r.trace.some((t) => t.detail === "Qloo's place in the city for Ramen is closed, can't be visited or has no location; the areas come from the map alone"), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(r.trace.some((t) => t.detail === "Qloo's place in the city for Ramen is closed, can't be visited, across the border or without a location; the areas come from the map alone"), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     m.restore();
   }

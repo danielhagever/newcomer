@@ -1,4 +1,4 @@
-// City lookup against 610 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 629 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
@@ -8,7 +8,9 @@
 // "Derry" Londonderry), "Bodo" alone (Bodo in Chad is a town of that name), a native city name with a region
 // that isn't its country ("Roma, Lazio"), "Newcastle, North East England" (the geocoder's Newcastle upon Tyne goes by
 // that name only: an alias reaches it from "Newcastle, UK" or "Newcastle, England"), "Ayvalik, Turkey" and "Bakirkoy,
-// Turkey" (filed as Aivali and under Istanbul: a village of the name is found)
+// Turkey" (filed as Aivali and under Istanbul: a village of the name is found), "Hamilton, North Island" (no region of
+// that name: a Hamilton in Rhode Island, another country, flagged), "Arlington, NoVA" ("Nova" is in Nova Scotia),
+// "Union City, North Jersey" and "Halifax, West Yorkshire" (filed under Calderdale), flagged
 // (Oahu, Kauai, Big Island and "Newcastle, UK/England" are now aliases in city.ts); and the ambiguous bare names
 // Newcastle, Victoria, Hong Kong, St Andrews, St Malo / Saint Malo (Manitoba, or a French village: Open-Meteo
 // gives Saint-Malo itself no population), Prince Edward Island. Run: npm test
@@ -24,7 +26,7 @@ const FIX: Record<string, unknown[]> = Object.fromEntries(
 );
 const CASES: [string, string, string | null][] = JSON.parse(readFileSync(new URL("./geo-cases.json", import.meta.url), "utf8"));
 
-test("city lookup: 610 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 629 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -50,7 +52,7 @@ test("city lookup: 610 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 610);
+  assert.equal(CASES.length, 629);
   assert.deepEqual(wrong, []);
 });
 
@@ -158,6 +160,7 @@ test("a direction typed before a region is dropped only when nothing fits with i
     assert.equal(coast?.lat, 30, "found among 100 by the region without its direction");
     assert.equal(coast?.unmatched, "West Coast", "flagged: the direction itself wasn't matched");
     assert.equal(coast?.regionAs, "Coast", "and the region as it fit, in the typed words");
+    assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Testburg, West Coast,."))?.regionAs, "Coast", "a part of only punctuation is left out (it crashed)");
   } finally {
     globalThis.fetch = original;
   }

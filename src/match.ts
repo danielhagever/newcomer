@@ -492,14 +492,16 @@ export async function matchNeighborhoods(
     trace.push({ step: "Filter", detail: `Left out ${atAirports} area${atAirports === 1 ? "" : "s"} at an airport` });
   }
   const placesAbroad = (h: Neighborhood) => {
-    const filed = [...h.evidence, ...h.matches].filter((e) => e.countryCode);
-    return filed.filter((e) => !home(e)).length * 2 > filed.length;
+    const ps = [...h.evidence, ...h.matches];
+    return ps.filter((e) => !home(e)).length * 2 > ps.length;
   };
   const across = hoods.filter(placesAbroad);
   if (across.length) {
     hoods = hoods.filter((h) => !placesAbroad(h));
     const where = [...new Set(across.flatMap((h) => [...h.evidence, ...h.matches].filter((e) => !home(e)).map((e) => e.countryCode)))].join(" and ");
     trace.push({ step: "Filter", detail: `Left out ${across.length} area${across.length === 1 ? "" : "s"} across the border (Qloo files ${across.length === 1 ? "its" : "their"} places in ${where})` });
+    // Not "try again later": every area Qloo ranks is another country's, which asking again won't change.
+    if (!hoods.length) throw new AppError(`The areas Qloo ranks highest around ${center.name} for these tastes are all across the border (Qloo files their places in ${where}), so none is shown as the city's. Try a nearby city or other tastes.`, 404);
   }
   for (const h of hoods) (h.evidence = h.evidence.filter(home)), (h.matches = h.matches.filter(home));
   // Where Qloo files most places inside an area under the city's own name and the area is at the city's centre, it is
@@ -554,7 +556,7 @@ export async function matchNeighborhoods(
     trace.push({
       step: "Your places",
       detail: kindsFound
-        ? `Qloo's ${kindsFound === 1 ? "place" : "places"} in the city for ${tastes} ${kindsFound === 1 ? "is" : "are"} closed, can't be visited or ${kindsFound === 1 ? "has" : "have"} no location; the areas come from the map alone`
+        ? `Qloo's ${kindsFound === 1 ? "place" : "places"} in the city for ${tastes} ${kindsFound === 1 ? "is" : "are"} closed, can't be visited, across the border or without a location; the areas come from the map alone`
         : `Qloo found no places in the city for ${tastes}; the areas come from the map alone`,
     });
   }

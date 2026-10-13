@@ -103,6 +103,8 @@ const ALIASES: Record<string, string> = {
   // Open-Meteo has no Newcastle upon Tyne under "Newcastle, UK"; islands are toured at their main town.
   ...Object.fromEntries(["uk", "gb", "england", "united kingdom", "great britain", "britain"].flatMap((r) => [`newcastle, ${r}`, `newcastle ${r}`]).map((k) => [k, "Newcastle upon Tyne, England"])),
   oahu: "Honolulu, Hawaii", kauai: "Lihue, Hawaii", "big island": "Hilo, Hawaii", // Maui is found as the island
+  // The geocoder's first "Venice" is Dayton, Ohio (135,000 people to Venice's 51,000); "Venice, Florida" stays.
+  venice: "Venice, Italy", "cd juarez": "Ciudad Juárez, Mexico",
 };
 // Big cities in their own language that Open-Meteo doesn't find by that name (measured 2026-10-13: "Roma, Italia" was a
 // village of 87, "Wien" Wienau, "Lisboa" Mozambique; München, Praha, Moskva and Köln were found): the English name, the
@@ -122,7 +124,7 @@ const US_AP: Record<string, string> = {
   fla: "Florida", ill: "Illinois", ind: "Indiana", kan: "Kansas", kans: "Kansas", mass: "Massachusetts", mich: "Michigan",
   minn: "Minnesota", miss: "Mississippi", mont: "Montana", neb: "Nebraska", nebr: "Nebraska", nev: "Nevada", okla: "Oklahoma",
   ore: "Oregon", oreg: "Oregon", penn: "Pennsylvania", tenn: "Tennessee", tex: "Texas", wash: "Washington", wis: "Wisconsin",
-  wyo: "Wyoming", wva: "West Virginia", ont: "Ontario", que: "Quebec", alta: "Alberta", man: "Manitoba", sask: "Saskatchewan",
+  wyo: "Wyoming", wva: "West Virginia", "w va": "West Virginia", ont: "Ontario", que: "Quebec", alta: "Alberta", man: "Manitoba", sask: "Saskatchewan",
   pei: "Prince Edward Island",
 };
 // Countries as people write them in their own language.
@@ -168,11 +170,15 @@ const US_STATE_NAMES = new Set(Object.values(US_STATES).map(regionWords));
 // Virginia") are dropped one at a time while nothing fits, never from a region known whole (West Virginia, North
 // Carolina), and the answer is flagged: the direction itself wasn't matched ("Newport, West Wales" is then the biggest
 // Newport in Wales, not Pembrokeshire's).
-const DIRECTION = /^(north|south|east|west|northern|southern|eastern|western|central|mid|upper) /;
+const DIRECTIONS = "north|south|east|west|northern|southern|eastern|western|northeast|northwest|southeast|southwest|ne|nw|se|sw|northeastern|northwestern|southeastern|southwestern|central|mid|upper|upstate";
+const DIRECTION = new RegExp(`^(${DIRECTIONS}) `);
+const ONLY_DIRECTION = new RegExp(`^(${DIRECTIONS})$`);
+// A region known whole keeps its direction (West Virginia), and a direction alone isn't a region ("North West" is
+// England's, not "West": it fit West Virginia and West Java).
 const dropDirection = (part: string) => {
   const spaced = part.replace(/-/g, " ");
-  if (KNOWN_REGIONS.has(part) || KNOWN_REGIONS.has(spaced) || !DIRECTION.test(spaced)) return part;
-  return spaced.replace(DIRECTION, "");
+  const rest = spaced.replace(DIRECTION, "");
+  return KNOWN_REGIONS.has(spaced) || rest === spaced || ONLY_DIRECTION.test(rest) ? part : rest;
 };
 // The region as typed, then with one more direction dropped from each part at each step.
 function regionLevels(parts: string[]): string[][] {
@@ -232,7 +238,7 @@ function respellings(name: string, nordic: boolean, turkish: boolean): string[] 
 }
 
 export async function cityCenter(cache: KVNamespace, budget: Budget, city: string): Promise<Place | null> {
-  const key = `city24:${city.toLowerCase()}`; // city24: directions dropped one at a time, Ste/Sainte, regionAs
+  const key = `city25:${city.toLowerCase()}`; // city25: compass directions, a lone direction isn't a region, Venice
   const hit = await kvGet(cache, budget, key);
   if (hit) return hit as Place;
   // "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK".
@@ -274,8 +280,10 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
     name = native[0];
     if (!rest.filter(Boolean).length) rest = [native[2]];
   }
-  // Each part after the name must fit the city: "Austin, TX, USA" is Texas and the United States.
-  const parts = rest.map(fold).filter(Boolean);
+  // Each part after the name must fit the city: "Austin, TX, USA" is Texas and the United States. A part that folds to
+  // nothing ("Tromso, Norway,.") is left out.
+  const typedParts = rest.map((x) => x.trim()).filter((x) => fold(x));
+  const parts = typedParts.map(fold);
   const levels = regionLevels(parts);
   const seen = new Set<unknown>();
   let list: any[] = [];
@@ -363,7 +371,6 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
       fitLevel = i;
       if (found.length) return found;
     }
-    fitLevel = 0;
     return [];
   };
   const pop = (r: any) => r.population ?? 0;
@@ -395,10 +402,10 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   const region = r.country_code === "US" || r.country_code === "CA" || (r.country_code === "GB" && r.admin1) ? r.admin1 : (r.country ?? TERRITORY[r.country_code]?.[0] ?? r.admin1);
   const cityName = r.country_code === "CA" && fold(r.name) === "quebec" && fold(r.admin1) === "quebec" ? `${r.name} City` : r.name;
   const label = `${cityName}${region ? ", " + region : ""}`;
-  const typedRegion = rest.filter(Boolean).join(", ");
+  const typedRegion = typedParts.join(", ");
   // The typed words left once directions were dropped ("Western North Carolina" as "North Carolina").
   const words = (s: string) => s.trim().split(/[\s-]+/);
-  const shownAs = (ps: string[]) => rest.filter(Boolean).map((typedPart, i) => words(typedPart).slice(words(typedPart).length - words(ps[i]).length).join(" ")).join(", ");
+  const shownAs = (ps: string[]) => typedParts.map((typedPart, i) => words(typedPart).slice(words(typedPart).length - words(ps[i]).length).join(" ")).join(", ");
   // Open-Meteo leaves out a coordinate that is exactly 0 (Stratford, London has no longitude).
   const out: Place = { lat: r.latitude ?? 0, lon: r.longitude ?? 0, name: label, query: label, ...(r.country_code ? { country: String(r.country_code) } : {}), ...(r.population ? { population: Number(r.population) } : {}), ...(typedRegion && (!matches.length || fitLevel) ? { unmatched: typedRegion } : {}), ...(matches.length && fitLevel ? { regionAs: shownAs(levels[fitLevel]) } : {}) };
   await kvPut(cache, budget, key, out, 60 * 60 * 24 * 30);
