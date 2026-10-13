@@ -11,7 +11,7 @@
 import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type Locality, type QlooEnv, type Signals, type Tag, type Where } from "./qloo.ts";
 import { forSearch, nameKey as typedName, rankNames, resembles, together, withoutNote } from "./names.ts";
 export { resembles };
-import { cityCenter, cityRadiusKm, km } from "./city.ts";
+import { cityCenter, cityRadiusKm, km, nation } from "./city.ts";
 import { cellKey, namesFor } from "./geo.ts";
 import { AppError, type Budget } from "./limits.ts";
 
@@ -332,6 +332,10 @@ export async function matchNeighborhoods(
 
   let heat: Awaited<ReturnType<Qloo["heatmap"]>> = { points: [] };
   let cityMatches: Entity[] = [];
+  // Only the country acts, as in Booker: a place Qloo files in another country is never shown, and an area whose places
+  // are mostly abroad isn't the city's (live: Ciudad Juárez's circle held El Paso's Downtown). Names decide nothing; a
+  // place with no country stays.
+  const home = (e: Entity) => !center.country || !e.countryCode || nation(e.countryCode) === nation(center.country);
   let kindsFound: number | undefined; // how many places Qloo's search for your kinds of places answered (when it did)
   let around: Where = { query: center.query }; // where the city is: asked by name, or around its centre once that proved wrong
   let byName: Locality | undefined; // how Qloo read the city's name for the map
@@ -387,7 +391,7 @@ export async function matchNeighborhoods(
           trace.push({ step: "Check", detail: `Qloo found none of your kinds of places for "${center.query}" by its name; asked again for ${r} km around the city centre` });
           mine = await q.places(placeSignals, { lat: center.lat, lon: center.lon, radiusM: r * 1000 }, 50, filterTags);
         }
-        cityMatches = mine.filter((p) => p.lat !== undefined && p.lon !== undefined && visitable(p));
+        cityMatches = mine.filter((p) => p.lat !== undefined && p.lon !== undefined && visitable(p) && home(p));
         kindsFound = mine.length;
       } catch {
         degraded = true;
@@ -487,6 +491,17 @@ export async function matchNeighborhoods(
     hoods = hoods.filter((h) => !airport(h));
     trace.push({ step: "Filter", detail: `Left out ${atAirports} area${atAirports === 1 ? "" : "s"} at an airport` });
   }
+  const placesAbroad = (h: Neighborhood) => {
+    const filed = [...h.evidence, ...h.matches].filter((e) => e.countryCode);
+    return filed.filter((e) => !home(e)).length * 2 > filed.length;
+  };
+  const across = hoods.filter(placesAbroad);
+  if (across.length) {
+    hoods = hoods.filter((h) => !placesAbroad(h));
+    const where = [...new Set(across.flatMap((h) => [...h.evidence, ...h.matches].filter((e) => !home(e)).map((e) => e.countryCode)))].join(" and ");
+    trace.push({ step: "Filter", detail: `Left out ${across.length} area${across.length === 1 ? "" : "s"} across the border (Qloo files ${across.length === 1 ? "its" : "their"} places in ${where})` });
+  }
+  for (const h of hoods) (h.evidence = h.evidence.filter(home)), (h.matches = h.matches.filter(home));
   // Where Qloo files most places inside an area under the city's own name and the area is at the city's centre, it is
   // the city centre (live: Melbourne's suburb "Melbourne" is its CBD; dropping that name let Fitzroy name it).
   const cityName = center.name.split(",")[0].trim();

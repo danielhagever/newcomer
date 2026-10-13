@@ -462,6 +462,44 @@ test("Qloo's locality is named by its own name first: Montreal's is \"Island of 
   }
 });
 
+test("only the country acts: an area whose places Qloo files mostly abroad is left out, and a place abroad is never shown", async () => {
+  // Live: Ciudad Juárez's circle held El Paso's Downtown (313 E Mills Ave). Here the first area asked is filed in Mexico.
+  const filed = (p: any, country_code: string) => ({ ...p, properties: { ...p.properties, geocode: { country_code } } });
+  let first = true;
+  const m = mockFetch((c) => {
+    if (isPlaces(c) && !c.params.get("filter.tags")) {
+      const p = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+      const abroad = first;
+      first = false;
+      // Every other area holds one place abroad among its own: shown without it, the area kept.
+      return { body: { results: { entities: [filed(place(`x${p[2]}`, abroad ? "Across Bar" : "Home Cafe", "Somewhere", +p[2], +p[1], ["Bar"], ["Evening"]), abroad ? "MX" : "US"), filed(place(`y${p[2]}`, "Border Grill", "Somewhere", +p[2], +p[1], ["Restaurant"], ["Evening"]), "MX"), place(`z${p[2]}`, "Unfiled Diner", "Somewhere", +p[2], +p[1], ["Diner"], ["Morning"])] } } };
+    }
+    return standardQloo()(c);
+  });
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.ok(r.trace.some((t) => t.step === "Filter" && t.detail === "Left out 1 area across the border (Qloo files its places in MX)"), JSON.stringify(r.trace.map((t) => t.detail)));
+    const shown = r.neighborhoods.flatMap((h) => h.evidence.map((e) => e.name));
+    assert.ok(!shown.includes("Across Bar") && !shown.includes("Border Grill"), shown.join(", "));
+    assert.ok(shown.includes("Home Cafe") && shown.includes("Unfiled Diner"), "a place with no country stays");
+  } finally {
+    m.restore();
+  }
+  // Your kinds of places abroad are never listed, whether they rank the areas (food only) or go under the map's areas.
+  const ramen = [filed(place("r1", "Ramen Abroad", "Centro Juarez", 30.27, -97.74, ["Ramen restaurant"], ["Evening"]), "MX"), filed(place("r2", "Ramen Home", "Downtown", 30.268, -97.742, ["Ramen restaurant"], ["Evening"]), "US"), filed(place("r3", "Ramen Two", "Downtown", 30.269, -97.741, ["Ramen restaurant"], ["Evening"]), "US")];
+  for (const interests of [[{ name: "ramen", kind: "tag" }], [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]] as Interest[][]) {
+    const r2 = mockFetch((c) => (isPlaces(c) && c.params.get("filter.tags") ? { body: { results: { entities: ramen } } } : standardQloo()(c)));
+    try {
+      const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", interests);
+      const listed = r.neighborhoods.flatMap((h) => [...h.matches, ...h.evidence].map((e) => e.name));
+      assert.ok(listed.includes("Ramen Home"), `${r.mode}: ${listed.join(", ")}`);
+      assert.ok(!listed.includes("Ramen Abroad") && !r.neighborhoods.some((h) => h.name === "Centro Juarez"), `${r.mode}: ${listed.join(", ")}`);
+    } finally {
+      r2.restore();
+    }
+  }
+});
+
 test("an area with an airport inside it is left out: a place filed as an airport, or a travel lounge at one; other lounges aren't airports", async () => {
   const at = (p: any, address: string) => ({ ...p, properties: { ...p.properties, address } });
   const cases: [string, (lat: number, lon: number) => any, boolean][] = [

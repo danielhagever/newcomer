@@ -29,6 +29,7 @@ export interface Entity {
   tags?: string[]; // a place's categories (Barbecue restaurant, Cocktail bar)
   times?: string[]; // Qloo's time-of-day fit for a place (Morning, Midday, Evening...)
   closed?: boolean; // Qloo says the place is closed, or its name does ("CLOSED - Tacos el Cabron": is_closed false, live)
+  countryCode?: string; // where Qloo files a place (ISO code)
 }
 
 export interface Tag {
@@ -61,7 +62,7 @@ export class QlooError extends AppError {}
 // over 20 s, so waiting helps more than asking again).
 const TIMEOUT_MS = 12000;
 // All of a search's Qloo calls share 40 s: each waits at most what is left (the heatmap all of it), so a slow
-// heatmap, the 25 km one after it and a retry can't keep an agent waiting past a client's usual 60 s limit.
+// heatmap, the circle around the city after it and a retry can't keep an agent waiting past a client's usual 60 s limit.
 // OpenStreetMap's area names come after, three at a time, 5 s a round at most (three rounds for the seven areas); a
 // live search takes 10 to 22 s in all.
 const TOTAL_MS = 40000;
@@ -296,6 +297,7 @@ function toEntity(e: any): Entity {
     affinity: Number.isFinite(affinity) ? affinity : undefined,
     popularity: typeof e.popularity === "number" ? e.popularity : undefined,
     neighborhood: typeof e.properties?.neighborhood === "string" && e.properties.neighborhood.trim() ? e.properties.neighborhood.trim() : undefined,
+    countryCode: typeof e.properties?.geocode?.country_code === "string" ? e.properties.geocode.country_code : undefined,
     tags: [...new Set(tags.filter((t) => CATEGORY.has(t.type) && t.name !== "Place").map((t) => t.name))].slice(0, 4),
     times: [...new Set(tags.filter((t) => t.type === "urn:tag:time_of_day_fit:qloo").map((t) => t.name))],
     ...(e.properties?.is_closed === true || closedName(String(e.name ?? "")) ? { closed: true } : {}),

@@ -1,4 +1,4 @@
-// City lookup against 592 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 610 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
@@ -15,7 +15,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { cityCenter } from "../src/city.ts";
+import { cityCenter, cityRadiusKm } from "../src/city.ts";
 import { Budget } from "../src/limits.ts";
 import { memoryKV } from "./mock.ts";
 
@@ -24,7 +24,7 @@ const FIX: Record<string, unknown[]> = Object.fromEntries(
 );
 const CASES: [string, string, string | null][] = JSON.parse(readFileSync(new URL("./geo-cases.json", import.meta.url), "utf8"));
 
-test("city lookup: 592 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 610 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -50,8 +50,12 @@ test("city lookup: 592 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 592);
+  assert.equal(CASES.length, 610);
   assert.deepEqual(wrong, []);
+});
+
+test("a city's circle holds its people at about 3,000 per km², from 3 to 25 km", () => {
+  assert.deepEqual([434, 94589, 960000, 2720546, 9733276, undefined].map(cityRadiusKm), [3, 3, 10, 17, 25, 3]); // Morrison .. Tokyo
 });
 
 test("a city typed as one of Object's own names ('constructor', '__proto__') is not found, not a crash", async () => {
@@ -153,6 +157,7 @@ test("a direction typed before a region is dropped only when nothing fits with i
     const coast = await cityCenter(memoryKV().kv, new Budget(48), "Testburg, West Coast");
     assert.equal(coast?.lat, 30, "found among 100 by the region without its direction");
     assert.equal(coast?.unmatched, "West Coast", "flagged: the direction itself wasn't matched");
+    assert.equal(coast?.regionAs, "Coast", "and the region as it fit, in the typed words");
   } finally {
     globalThis.fetch = original;
   }
