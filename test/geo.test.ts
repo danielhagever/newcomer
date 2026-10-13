@@ -1,9 +1,11 @@
-// City lookup against 516 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 569 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
 // "Windsor, Berkshire" (filed under Windsor and Maidenhead: Windsor, Ontario, flagged), "Derry, Ireland" (filed as
-// Londonderry), "Lorenskog" (no Lørenskog at all)
+// Londonderry), "Lorenskog" (no Lørenskog at all), "Ennis" alone (the geocoder ranks Surprise, Arizona first for it;
+// "Ennis, Co. Clare" works), "Bodo" alone (Bodo in Chad is a town of that name), a native city name with a region
+// that isn't its country ("Roma, Lazio")
 // (Oahu, Kauai, Big Island and "Newcastle, UK/England" are now aliases in city.ts); and the ambiguous bare names
 // Newcastle, Victoria, Hong Kong, St Andrews, St Malo / Saint Malo (Manitoba, or a French village: Open-Meteo
 // gives Saint-Malo itself no population), Prince Edward Island. Run: npm test
@@ -19,7 +21,7 @@ const FIX: Record<string, unknown[]> = Object.fromEntries(
 );
 const CASES: [string, string, string | null][] = JSON.parse(readFileSync(new URL("./geo-cases.json", import.meta.url), "utf8"));
 
-test("city lookup: 516 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 569 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -45,7 +47,7 @@ test("city lookup: 516 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 516);
+  assert.equal(CASES.length, 569);
   assert.deepEqual(wrong, []);
 });
 
@@ -94,7 +96,7 @@ test("a place of exactly the typed name that fits beats another name that fits, 
   // Live: Open-Meteo's first 10 for "Hartford" hold Oak Harbor, Ohio (some old name of it); Hartford, Ohio is further down.
   // An old name keeps its city: "Saigon" finds Ho Chi Minh City, not a hamlet of that name.
   const R = (name: string, population: number, latitude: number) => ({ name, admin1: "Ohio", country: "United States", country_code: "US", population, feature_code: "PPL", latitude, longitude: -82 });
-  const answers: Record<string, any[]> = { "Testford|10": [R("Oak Harbor", 2715, 41.5)], "Testford|100": [R("Oak Harbor", 2715, 41.5), R("Testford", 384, 41.2)], "Oldname|10": [R("Bigcity", 500000, 39)], "Oldname|100": [R("Bigcity", 500000, 39), R("Oldname", 300, 40)] };
+  const answers: Record<string, any[]> = { "Testford|10": [R("Oak Harbor", 2715, 41.5)], "Testford|100": [R("Oak Harbor", 2715, 41.5), R("Testford", 384, 41.2)], "Oldname|10": [R("Bigcity", 6000, 39)], "Oldname|100": [R("Bigcity", 6000, 39), R("Oldname", 300, 40)] };
   const original = globalThis.fetch;
   globalThis.fetch = (async (input: any) => {
     const u = new URL(typeof input === "string" ? input : input.url);
@@ -102,7 +104,7 @@ test("a place of exactly the typed name that fits beats another name that fits, 
   }) as typeof fetch;
   try {
     assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Testford, Ohio"))?.lat, 41.2);
-    assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Oldname, Ohio"))?.lat, 39);
+    assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Oldname, Ohio"))?.lat, 39, "20 times bigger keeps the other name");
   } finally {
     globalThis.fetch = original;
   }
@@ -110,7 +112,7 @@ test("a place of exactly the typed name that fits beats another name that fits, 
 
 test("a Norwegian or Danish name typed without ø or æ is asked again with them; an answer of another name counts only with people", async () => {
   const R = (name: string, population?: number) => ({ name, admin1: "Troms", country: "Norway", country_code: "NO", ...(population ? { population } : {}), feature_code: "PPL", latitude: 69, longitude: 19 });
-  const answers: Record<string, any[]> = { "Testsø": [R("Testsø Kommune", 5000)], "Testbø": [R("Testbø Airport")] };
+  const answers: Record<string, any[]> = { "Testsø": [R("Testsø Kommune", 5000)], "Testbø": [R("Testbø Airport")], "TESTæ": [R("Testæ", 800)] };
   const original = globalThis.fetch;
   const asked: string[] = [];
   globalThis.fetch = (async (input: any) => {
@@ -121,9 +123,33 @@ test("a Norwegian or Danish name typed without ø or æ is asked again with them
   try {
     assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Testso, Norway"))?.name, "Testsø Kommune, Norway");
     assert.equal(await cityCenter(memoryKV().kv, new Budget(48), "Testbo, Norway"), null, "an airport isn't the town");
+    assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "TESTAE, Norway"))?.name, "Testæ, Norway", "capitals too");
     asked.length = 0;
     await cityCenter(memoryKV().kv, new Budget(48), "Testbo, Ohio");
     assert.ok(!asked.includes("Testbø"), "only with no country or a Nordic one");
+    asked.length = 0;
+    await cityCenter(memoryKV().kv, new Budget(48), "Testoboi");
+    assert.deepEqual(asked, ["Testoboi", "Testobøi", "Testøboi"], "two respellings at most (ø here, before ı)");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("a direction typed before a region is dropped only when nothing fits with it, among 100 places too", async () => {
+  const R = (admin1: string, population: number, latitude: number) => ({ name: "Testburg", admin1, country: "Testland", country_code: "TL", population, feature_code: "PPL", latitude, longitude: 0 });
+  const TEN = [R("Northern Upland", 1000, 10), R("Upland", 90000, 20)];
+  const HUNDRED = [...TEN, R("Coast", 500, 30)];
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    return new Response(JSON.stringify({ results: u.searchParams.get("count") === "100" ? HUNDRED : TEN }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Testburg, Northern Upland"))?.lat, 10, "it fits as typed");
+    assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Testburg, South Upland"))?.lat, 20, "Upland, the biggest that fits without South");
+    const coast = await cityCenter(memoryKV().kv, new Budget(48), "Testburg, West Coast");
+    assert.equal(coast?.lat, 30, "found among 100 by the region without its direction");
+    assert.equal(coast?.unmatched, undefined);
   } finally {
     globalThis.fetch = original;
   }
@@ -141,6 +167,18 @@ test("a county fits only outside the US and only for a word that isn't a state o
     assert.equal(hants?.lat, 51, "not the US town in Hampshire County: the biggest Testburg, flagged");
     assert.equal(hants?.unmatched, "Hampshire");
     assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Testburg, Ohio"))?.lat, 41, "Ohio the state, not a county named Ohio");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("a coordinate the geocoder leaves out is 0 (it drops exactly 0: Stratford, London has no longitude)", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ results: [{ name: "Testford", admin1: "England", admin2: "Greater London", country: "United Kingdom", country_code: "GB", population: 51387, feature_code: "PPL", latitude: 51.54 }] }), { headers: { "content-type": "application/json" } })) as typeof fetch;
+  try {
+    const p = await cityCenter(memoryKV().kv, new Budget(48), "Testford, London");
+    assert.equal(p?.lon, 0);
+    assert.equal(p?.lat, 51.54);
   } finally {
     globalThis.fetch = original;
   }
