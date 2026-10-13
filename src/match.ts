@@ -11,7 +11,7 @@
 import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type Locality, type QlooEnv, type Signals, type Tag, type Where } from "./qloo.ts";
 import { forSearch, nameKey as typedName, rankNames, resembles, together, withoutNote } from "./names.ts";
 export { resembles };
-import { cityCenter, cityRadiusKm, km, nation } from "./city.ts";
+import { cityCenter, cityRadiusKm, countryName, km, nation, readNote } from "./city.ts";
 import { cellKey, namesFor } from "./geo.ts";
 import { AppError, type Budget } from "./limits.ts";
 
@@ -274,6 +274,8 @@ export async function matchNeighborhoods(
   const center = await cityCenter(env.CACHE, budget, city);
   if (!center) throw new AppError(`I couldn't find "${city}". Try the city and its state or country, like "Austin, Texas".`, 400);
   trace.push({ step: "Locate", detail: `${center.name} (${center.lat.toFixed(3)}, ${center.lon.toFixed(3)}) via Open-Meteo geocoding` });
+  const note = readNote(city, center); // as Booker says it (pass 50: Newcomer never said how a city was read)
+  if (note) trace.push({ step: "Check", detail: note });
 
   // 1. Each interest becomes a Qloo entity or tag. Same names are looked up once.
   const seen = new Set<string>();
@@ -491,17 +493,20 @@ export async function matchNeighborhoods(
     hoods = hoods.filter((h) => !airport(h));
     trace.push({ step: "Filter", detail: `Left out ${atAirports} area${atAirports === 1 ? "" : "s"} at an airport` });
   }
+  // Judged by the places inside the area's own square, as its name is: the places within 1.2 km reach across a border
+  // the area itself doesn't (live: Beausoleil's square is in France, its places within reach in Monaco).
   const placesAbroad = (h: Neighborhood) => {
-    const ps = [...h.evidence, ...h.matches];
+    const ps = [...h.evidence, ...h.matches].filter((e) => inSquare(h, e));
     return ps.filter((e) => !home(e)).length * 2 > ps.length;
   };
   const across = hoods.filter(placesAbroad);
   if (across.length) {
     hoods = hoods.filter((h) => !placesAbroad(h));
-    const where = [...new Set(across.flatMap((h) => [...h.evidence, ...h.matches].filter((e) => !home(e)).map((e) => e.countryCode)))].join(" and ");
-    trace.push({ step: "Filter", detail: `Left out ${across.length} area${across.length === 1 ? "" : "s"} across the border (Qloo files ${across.length === 1 ? "its" : "their"} places in ${where})` });
+    const where = [...new Set(across.flatMap((h) => [...h.evidence, ...h.matches].filter((e) => inSquare(h, e) && !home(e)).map((e) => countryName(e.countryCode!))))].join(" and ");
+    const its = across.length === 1 ? "its" : "their";
+    trace.push({ step: "Filter", detail: `Left out ${across.length} area${across.length === 1 ? "" : "s"} across the border (Qloo files ${its} places in ${where})` });
     // Not "try again later": every area Qloo ranks is another country's, which asking again won't change.
-    if (!hoods.length) throw new AppError(`The areas Qloo ranks highest around ${center.name} for these tastes are all across the border (Qloo files their places in ${where}), so none is shown as the city's. Try a nearby city or other tastes.`, 404);
+    if (!hoods.length) throw new AppError(`The ${across.length === 1 ? "area" : "areas"} Qloo ranks highest around ${center.name} for these tastes ${across.length === 1 ? "is" : "are all"} across the border (Qloo files ${its} places in ${where}), so none is shown as the city's. Try a nearby city or other tastes.`, 404);
   }
   for (const h of hoods) (h.evidence = h.evidence.filter(home)), (h.matches = h.matches.filter(home));
   // Where Qloo files most places inside an area under the city's own name and the area is at the city's centre, it is

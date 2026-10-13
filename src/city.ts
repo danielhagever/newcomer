@@ -42,7 +42,10 @@ const OTHER_REGIONS: Record<string, string[]> = {
 const COUNTRY_WORDS: Record<string, string> = { usa: "us", "united states": "us", us: "us", uk: "gb", "united kingdom": "gb", czech: "cz", "czech republic": "cz" };
 // Territories, whose records carry no country name: their own name, and the country they belong to (Qloo files
 // Puerto Rico's rooms as the US and Hong Kong's as China, live). "Ponce, Puerto Rico" landed in Cuba without this.
+// Palestine's and Western Sahara's records have no country name either, and count as themselves ("Bethlehem,
+// Palestine" was Bethlehem, South Africa).
 export const TERRITORY: Record<string, [string, string]> = {
+  PS: ["Palestine", "PS"], EH: ["Western Sahara", "EH"],
   PR: ["Puerto Rico", "US"], GU: ["Guam", "US"], VI: ["U.S. Virgin Islands", "US"], AS: ["American Samoa", "US"], MP: ["Northern Mariana Islands", "US"],
   HK: ["Hong Kong", "CN"], MO: ["Macau", "CN"],
   KY: ["Cayman Islands", "GB"], BM: ["Bermuda", "GB"], VG: ["British Virgin Islands", "GB"], TC: ["Turks and Caicos Islands", "GB"], AI: ["Anguilla", "GB"],
@@ -155,17 +158,32 @@ const fold = (s: unknown) => plainLetters(String(s ?? "").normalize("NFKD").repl
 // What a region word can mean: "tx" Texas, "on" Ontario, "wa" Washington or Western Australia.
 const regionNames = (part: string) =>
   [part, US_STATES[part], US_AP[part], ...(OTHER_REGIONS[part] ?? []), ENDONYMS[part]].filter(Boolean).map((x) => fold(x));
-const KNOWN_REGIONS = new Set([
-  ...Object.keys(US_STATES), ...Object.values(US_STATES).map(fold), ...Object.keys(US_AP), ...Object.keys(OTHER_REGIONS),
-  ...Object.values(OTHER_REGIONS).flat().map(fold), ...Object.keys(COUNTRY_WORDS), ...Object.keys(ENDONYMS),
+// Countries (and the UK's nations) as typed, folded.
+const COUNTRIES = new Set([
+  ...Object.keys(COUNTRY_WORDS),
   ...("canada,australia,germany,france,spain,italy,ireland,netherlands,the netherlands,japan,mexico,brazil,israel,portugal,norway," +
     "sweden,denmark,finland,iceland,austria,switzerland,belgium,luxembourg,poland,czechia,hungary,greece,turkiye,croatia,slovenia," +
     "serbia,romania,bulgaria,estonia,latvia,lithuania,ukraine,northern ireland,scotland,wales,england,new zealand,south africa," +
     "argentina,chile,colombia,peru,south korea,korea,china,taiwan,india,thailand,vietnam,indonesia,philippines,singapore,malaysia," +
     "united arab emirates,egypt,morocco,nigeria,kenya").split(","),
 ]);
+const KNOWN_REGIONS = new Set([
+  ...Object.keys(US_STATES), ...Object.values(US_STATES).map(fold), ...Object.keys(US_AP), ...Object.keys(OTHER_REGIONS),
+  ...Object.values(OTHER_REGIONS).flat().map(fold), ...Object.keys(ENDONYMS), ...COUNTRIES,
+]);
 // A typed US state is that state only, not a longer one with its name: "Huntington, VA" was Huntington, West Virginia.
 const US_STATE_NAMES = new Set(Object.values(US_STATES).map(regionWords));
+// A state followed by its country with no comma between them is two parts ("Salem, MA USA", "London, ON Canada"); a
+// direction before a state stays one ("NE Ohio" is northeast Ohio, not Nebraska and Ohio: only a country can follow).
+const splitRegion = (part: string): string[] => {
+  const ws = part.split(/\s+/);
+  for (let k = 1; k <= 3 && k < ws.length; k++) {
+    const head = ws.slice(0, -k).join(" ");
+    const tail = ws.slice(-k).join(" ");
+    if (KNOWN_REGIONS.has(fold(head)) && COUNTRIES.has(fold(tail))) return [head, tail];
+  }
+  return [part];
+};
 // Directions typed before a region ("Bangor, North Wales", "Lancaster, North-West England", "Charleston, Southern West
 // Virginia") are dropped one at a time while nothing fits, never from a region known whole (West Virginia, North
 // Carolina), and the answer is flagged: the direction itself wasn't matched ("Newport, West Wales" is then the biggest
@@ -238,11 +256,13 @@ function respellings(name: string, nordic: boolean, turkish: boolean): string[] 
 }
 
 export async function cityCenter(cache: KVNamespace, budget: Budget, city: string): Promise<Place | null> {
-  const key = `city25:${city.toLowerCase()}`; // city25: compass directions, a lone direction isn't a region, Venice
+  const key = `city26:${city.toLowerCase()}`; // city26: parts cleaned first, "MA USA" split, Palestine and Western Sahara
   const hit = await kvGet(cache, budget, key);
   if (hit) return hit as Place;
-  // "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK".
-  const typed = (ALIASES[fold(city).replace(/\s*,\s*/g, ", ")] ?? city).replace(/[\u2018\u2019]/g, "'");
+  // The typed parts, cleaned once before any step reads them: "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK";
+  // a part that folds to nothing ("Venice,.", "Newcastle, UK,") is left out; "MA USA" is two parts.
+  const cleaned = city.split(",").map((x) => x.trim()).filter((x) => fold(x)).flatMap((x, i) => (i ? splitRegion(x) : [x])).join(", ");
+  const typed = (ALIASES[fold(cleaned)] ?? cleaned).replace(/[\u2018\u2019]/g, "'");
   let [name, ...rest] = typed.split(",").map((x) => x.trim());
   if (!name) return null;
   // A nickname before the comma too: "Quebec City, QC", "Bangalore, India", "Washington DC, USA" (and, below,
@@ -252,14 +272,14 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
     if (!alias) return;
     const [aliasName, ...aliasRest] = alias.split(",").map((x) => x.trim());
     name = aliasName;
-    if (!rest.filter(Boolean).length) rest = aliasRest;
+    if (!rest.length) rest = aliasRest;
   };
   unalias();
   let whole: any[] | undefined; // the answer for the whole name, when it was already asked for
   // Without a comma the state or country may close the text ("Austin TX", "Portland Maine", "London
   // England"), but a city's own name may end in one too ("New Britain", "Port Washington", "West New York"):
   // the whole name is kept when Open-Meteo has a place with exactly that name.
-  if (!rest.filter(Boolean).length) {
+  if (!rest.length) {
     const ws = name.split(/\s+/);
     const k = [3, 2, 1].find((k) => ws.length > k && KNOWN_REGIONS.has(fold(ws.slice(-k).join(" "))));
     if (k) {
@@ -278,12 +298,10 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   const nativeCountry = (p: string) => !!native && (p === native[1].toLowerCase() || regionNames(p).includes(fold(native[2])));
   if (native && regionLevels(rest.map(fold).filter(Boolean)).some((ps) => ps.every(nativeCountry))) {
     name = native[0];
-    if (!rest.filter(Boolean).length) rest = [native[2]];
+    if (!rest.length) rest = [native[2]];
   }
-  // Each part after the name must fit the city: "Austin, TX, USA" is Texas and the United States. A part that folds to
-  // nothing ("Tromso, Norway,.") is left out.
-  const typedParts = rest.map((x) => x.trim()).filter((x) => fold(x));
-  const parts = typedParts.map(fold);
+  // Each part after the name must fit the city: "Austin, TX, USA" is Texas and the United States.
+  const parts = rest.map(fold);
   const levels = regionLevels(parts);
   const seen = new Set<unknown>();
   let list: any[] = [];
@@ -402,10 +420,10 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   const region = r.country_code === "US" || r.country_code === "CA" || (r.country_code === "GB" && r.admin1) ? r.admin1 : (r.country ?? TERRITORY[r.country_code]?.[0] ?? r.admin1);
   const cityName = r.country_code === "CA" && fold(r.name) === "quebec" && fold(r.admin1) === "quebec" ? `${r.name} City` : r.name;
   const label = `${cityName}${region ? ", " + region : ""}`;
-  const typedRegion = typedParts.join(", ");
+  const typedRegion = rest.join(", ");
   // The typed words left once directions were dropped ("Western North Carolina" as "North Carolina").
   const words = (s: string) => s.trim().split(/[\s-]+/);
-  const shownAs = (ps: string[]) => typedParts.map((typedPart, i) => words(typedPart).slice(words(typedPart).length - words(ps[i]).length).join(" ")).join(", ");
+  const shownAs = (ps: string[]) => rest.map((typedPart, i) => words(typedPart).slice(words(typedPart).length - words(ps[i]).length).join(" ")).join(", ");
   // Open-Meteo leaves out a coordinate that is exactly 0 (Stratford, London has no longitude).
   const out: Place = { lat: r.latitude ?? 0, lon: r.longitude ?? 0, name: label, query: label, ...(r.country_code ? { country: String(r.country_code) } : {}), ...(r.population ? { population: Number(r.population) } : {}), ...(typedRegion && (!matches.length || fitLevel) ? { unmatched: typedRegion } : {}), ...(matches.length && fitLevel ? { regionAs: shownAs(levels[fitLevel]) } : {}) };
   await kvPut(cache, budget, key, out, 60 * 60 * 24 * 30);
@@ -441,6 +459,20 @@ async function byId(budget: Budget, id: number): Promise<any[]> {
 // How far a circle around a city's centre reaches to cover the city: a disc holding its people at about 3,000 per
 // km², from 3 to 25 km (Yonkers 5 km, Honolulu 6, Kyoto 12, Moscow 25). Unknown population: 3 km.
 export const cityRadiusKm = (population?: number) => Math.min(25, Math.max(3, Math.round(Math.sqrt((population ?? 0) / 3000 / Math.PI))));
+
+// What to tell the person when what followed the comma didn't fit the city as typed; a region that fit only without
+// its direction says so ("Northern Norway" as Norway), not that it didn't match.
+export const readNote = (typed: string, c: Place) =>
+  c.unmatched ? `"${typed}" was read as ${c.name}; ${c.regionAs ? `"${c.unmatched}" fit only as "${c.regionAs}"` : `"${c.unmatched}" didn't match its state or country`}, so check this is the city you meant.` : undefined;
+
+// A country's name in English from its code ("MC" is Monaco), or the code where the runtime has no name for it.
+export const countryName = (code: string) => {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "region" }).of(code.toUpperCase()) ?? code;
+  } catch {
+    return code;
+  }
+};
 
 export function km(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
   const r = (d: number) => (d * Math.PI) / 180;

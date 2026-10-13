@@ -478,7 +478,7 @@ test("only the country acts: an area whose places Qloo files mostly abroad is le
   });
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
-    assert.ok(r.trace.some((t) => t.step === "Filter" && t.detail === "Left out 1 area across the border (Qloo files its places in MX)"), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(r.trace.some((t) => t.step === "Filter" && t.detail === "Left out 1 area across the border (Qloo files its places in Mexico)"), JSON.stringify(r.trace.map((t) => t.detail)));
     const shown = r.neighborhoods.flatMap((h) => h.evidence.map((e) => e.name));
     assert.ok(!shown.includes("Across Bar") && !shown.includes("Border Grill"), shown.join(", "));
     assert.ok(shown.includes("Home Cafe") && shown.includes("Unfiled Diner"), "a place with no country stays");
@@ -486,7 +486,23 @@ test("only the country acts: an area whose places Qloo files mostly abroad is le
     m.restore();
   }
   // Your kinds of places abroad are never listed, whether they rank the areas (food only) or go under the map's areas.
-  const ramen = [filed(place("r1", "Ramen Abroad", "Centro Juarez", 30.27, -97.74, ["Ramen restaurant"], ["Evening"]), "MX"), filed(place("r2", "Ramen Home", "Downtown", 30.268, -97.742, ["Ramen restaurant"], ["Evening"]), "US"), filed(place("r3", "Ramen Two", "Downtown", 30.269, -97.741, ["Ramen restaurant"], ["Evening"]), "US")];
+  const ramen = [filed(place("r1", "Ramen Abroad", "Downtown", 30.2685, -97.7415, ["Ramen restaurant"], ["Evening"]), "MX"), filed(place("r2", "Ramen Home", "Downtown", 30.268, -97.742, ["Ramen restaurant"], ["Evening"]), "US"), filed(place("r3", "Ramen Two", "Downtown", 30.269, -97.741, ["Ramen restaurant"], ["Evening"]), "US")];
+  // Places abroad only outside the area's own square don't make it foreign (live: Beausoleil's square is in France, the
+  // places within 1.2 km of it in Monaco); they are still never shown.
+  const outside = mockFetch((c) => {
+    if (isPlaces(c) && !c.params.get("filter.tags")) {
+      const p = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+      return { body: { results: { entities: [filed(place(`o${p[2]}`, "Over There", "Somewhere", +p[2] + 0.03, +p[1], ["Bar"], ["Evening"]), "MC")] } } };
+    }
+    return standardQloo()(c);
+  });
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.ok(r.neighborhoods.length > 0 && !r.trace.some((t) => /across the border/.test(t.detail)), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(!r.neighborhoods.some((h) => h.evidence.some((e) => e.name === "Over There")));
+  } finally {
+    outside.restore();
+  }
   // A territory is its country's: San Juan's places filed as the US stay (Qloo files Puerto Rico as the US, live); a city
   // with no country keeps every place; and when every area is abroad the search says so, not "try again later".
   const sanJuan = { ...AUSTIN, name: "San Juan", admin1: "San Juan", country: undefined, country_code: "PR" };
@@ -502,8 +518,13 @@ test("only the country acts: an area whose places Qloo files mostly abroad is le
     });
     try {
       const search = matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
-      if (ok) assert.ok((await search).neighborhoods.length > 0, what);
-      else await assert.rejects(search, (e: AppError) => e.status === 404 && /are all across the border \(Qloo files their places in MX\)/.test(e.message), what);
+      if (ok) {
+        const r = await search;
+        assert.ok(r.neighborhoods.length > 0, what);
+        // How the city was read is said, as Booker says it (pass 50).
+        if (what === "San Juan") assert.ok(r.trace.some((t) => t.step === "Check" && t.detail === '"Austin, Texas" was read as San Juan, Puerto Rico; "Texas" didn\'t match its state or country, so check this is the city you meant.'), JSON.stringify(r.trace.map((t) => t.detail)));
+      }
+      else await assert.rejects(search, (e: AppError) => e.status === 404 && /are all across the border \(Qloo files their places in Mexico\)/.test(e.message), what);
     } finally {
       g.restore();
     }
@@ -514,7 +535,8 @@ test("only the country acts: an area whose places Qloo files mostly abroad is le
       const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", interests);
       const listed = r.neighborhoods.flatMap((h) => [...h.matches, ...h.evidence].map((e) => e.name));
       assert.ok(listed.includes("Ramen Home"), `${r.mode}: ${listed.join(", ")}`);
-      assert.ok(!listed.includes("Ramen Abroad") && !r.neighborhoods.some((h) => h.name === "Centro Juarez"), `${r.mode}: ${listed.join(", ")}`);
+      // In the same area as two at home: the area stays, without it.
+      assert.ok(!listed.includes("Ramen Abroad"), `${r.mode}: ${listed.join(", ")}`);
     } finally {
       r2.restore();
     }
