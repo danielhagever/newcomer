@@ -3,6 +3,7 @@
 // Caching is best effort: the free plan allows 1,000 KV writes a day, and a failed write must never fail a search.
 
 import { AppError, Budget, UA, fetchWithTimeout } from "./limits.ts";
+import { plainLetters } from "./names.ts";
 
 export interface Place {
   lat: number;
@@ -109,7 +110,7 @@ const NATIVE: Record<string, [string, string, string]> = {
   firenze: ["Florence", "IT", "Italy"], venezia: ["Venice", "IT", "Italy"], padova: ["Padua", "IT", "Italy"], mantova: ["Mantua", "IT", "Italy"],
   wien: ["Vienna", "AT", "Austria"], athina: ["Athens", "GR", "Greece"], lisboa: ["Lisbon", "PT", "Portugal"], kiev: ["Kyiv", "UA", "Ukraine"],
   bruxelles: ["Brussels", "BE", "Belgium"], warszawa: ["Warsaw", "PL", "Poland"], kobenhavn: ["Copenhagen", "DK", "Denmark"],
-  københavn: ["Copenhagen", "DK", "Denmark"], "den haag": ["The Hague", "NL", "Netherlands"], "den bosch": ["'s-Hertogenbosch", "NL", "Netherlands"],
+  "den haag": ["The Hague", "NL", "Netherlands"], "den bosch": ["'s-Hertogenbosch", "NL", "Netherlands"],
   bucuresti: ["Bucharest", "RO", "Romania"], "san sebastian": ["Donostia", "ES", "Spain"], "sankt petersburg": ["Saint Petersburg", "RU", "Russia"],
   bayrut: ["Beirut", "LB", "Lebanon"],
 };
@@ -137,10 +138,16 @@ const ENDONYMS: Record<string, string> = {
   "comunitat valenciana": "Valencia", "valencian community": "Valencia", navarra: "Navarre", "islas baleares": "Balearic Islands",
   "illes balears": "Balearic Islands", "islas canarias": "Canary Islands", canarias: "Canary Islands", "region de murcia": "Murcia",
   "comunidad de madrid": "Madrid",
+  // Denmark's regions in Danish (Open-Meteo writes them in English), and countries in their own language.
+  sjaelland: "Zealand", hovedstaden: "Capital Region", syddanmark: "South Denmark", midtjylland: "Central Jutland",
+  nordjylland: "North Denmark", belgique: "Belgium", belgie: "Belgium", ukraina: "Ukraine", hellas: "Greece", ellada: "Greece",
+  suomi: "Finland", hrvatska: "Croatia", magyarorszag: "Hungary", cesko: "Czechia", rossiya: "Russia", srbija: "Serbia",
+  slovensko: "Slovakia", slovenija: "Slovenia", eesti: "Estonia", latvija: "Latvia", lietuva: "Lithuania",
 };
 // Typed words are looked up in these tables, so they must not inherit Object's own names ("constructor", "__proto__").
 for (const t of [US_STATES, OTHER_REGIONS, COUNTRY_WORDS, ALIASES, NATIVE, US_AP, ENDONYMS]) Object.setPrototypeOf(t, null);
-const fold = (s: unknown) => String(s ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
+// Accents dropped and letters written plain as people type them ("Trondelag" is Trøndelag, "Kirsehir" Kırşehir).
+const fold = (s: unknown) => plainLetters(String(s ?? "").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase()).replace(/\./g, "").replace(/\s+/g, " ").trim();
 // What a region word can mean: "tx" Texas, "on" Ontario, "wa" Washington or Western Australia.
 const regionNames = (part: string) =>
   [part, US_STATES[part], US_AP[part], ...(OTHER_REGIONS[part] ?? []), ENDONYMS[part]].filter(Boolean).map((x) => fold(x));
@@ -155,9 +162,10 @@ const KNOWN_REGIONS = new Set([
 ]);
 // A typed US state is that state only, not a longer one with its name: "Huntington, VA" was Huntington, West Virginia.
 const US_STATE_NAMES = new Set(Object.values(US_STATES).map(regionWords));
-// A direction typed before a region ("Bangor, North Wales", "Santa Rosa, Northern California") is dropped when nothing
-// fits with it.
-const undirected = (part: string) => part.replace(/^(north|south|east|west|northern|southern|eastern|western|central|upper|lower|mid) /, "");
+// Directions typed before a region ("Bangor, North Wales", "Newcastle, North East England") are dropped when nothing fits
+// with them, and the answer is flagged: the direction itself wasn't matched ("Newport, West Wales" is then the biggest
+// Newport in Wales, not Pembrokeshire's).
+const undirected = (part: string) => part.replace(/^((north|south|east|west|northern|southern|eastern|western|central) )+/, "");
 // One form for comparing place names across spellings: "Saint-Étienne", "St Etienne" and "St. Etienne" are the
 // same name; so are "St. John's" and "St Johns".
 const canon = (s: unknown) =>
@@ -183,14 +191,15 @@ function spellings(name: string): string[] {
   return out.slice(0, 3);
 }
 
-// Letters Open-Meteo has no plain spelling for (measured 2026-10-13): ø and æ (all 20 Norwegian and Danish cities with
-// them were missed typed plain) and the Turkish dotless ı ("Diyarbakir" found only an airport, "Kirsehir" and
-// "Bandirma" nothing). Every other letter was found plain (å, ö, ü, ł, ş, ğ and the rest).
+// Letters Open-Meteo's search has no plain spelling for (measured 2026-10-13): ø and æ (all 20 Norwegian and Danish
+// cities with them were missed typed plain) and the Turkish dotless ı ("Diyarbakir" found only an airport, "Kirsehir"
+// and "Bandirma" nothing). Å, ö, ü, ł, ş, ğ and the like were found plain; Icelandic ð isn't retried ("Egilsstadir"
+// isn't found), nor a name needing two letters changed ("Igdir" is Iğdır, "Vaerlose" Værløse).
+// The countries and their regions (Open-Meteo's names; the Danish ones are in ENDONYMS), as folded.
 const NORDIC = new Set([
-  ..."norway,norge,no,denmark,danmark,dk,faroe islands,greenland,troms,finnmark,troms og finnmark,nordland,trondelag,trøndelag".split(","),
-  ..."more og romsdal,møre og romsdal,vestland,rogaland,agder,vestfold,telemark,akershus,buskerud,ostfold,østfold,innlandet".split(","),
-  ..."oslo,viken,hovedstaden,sjaelland,sjælland,zealand,syddanmark,southern denmark,midtjylland,central jutland,nordjylland".split(","),
-  ..."north jutland,jutland,funen,fyn".split(","),
+  ..."norway,norge,no,denmark,danmark,dk,faroe islands,greenland,troms,finnmark,nordland,trondelag,more og romsdal,vestland".split(","),
+  ..."rogaland,agder,vestfold,telemark,akershus,buskerud,ostfold,innlandet,oslo,zealand,capital region,south denmark".split(","),
+  ..."central jutland,north denmark,sjaelland,hovedstaden,syddanmark,midtjylland,nordjylland".split(","),
 ]);
 const TURKISH = new Set(["turkey", "turkiye", "tr"]);
 // One letter at its last place, then its first: "Tromso" -> Tromsø, Trømso; "Kirklareli" -> Kirklarelı, Kırklareli. (The
@@ -209,7 +218,7 @@ function respellings(name: string, nordic: boolean, turkish: boolean): string[] 
 }
 
 export async function cityCenter(cache: KVNamespace, budget: Budget, city: string): Promise<Place | null> {
-  const key = `city22:${city.toLowerCase()}`; // city22: counties by whole words, states exactly, native names, ı; 0 coordinates
+  const key = `city23:${city.toLowerCase()}`; // city23: plain letters, directions flagged, native names' country, no bare-name rule
   const hit = await kvGet(cache, budget, key);
   if (hit) return hit as Place;
   // "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK".
@@ -243,11 +252,17 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
       }
     }
   }
+  // A big city typed in its own language that Open-Meteo doesn't find by that name (only "Roma, Texas" stays Roma), with
+  // its country when none was typed ("Venezia" alone: the geocoder's first "Venice" is Dayton, Ohio).
+  const native = NATIVE[fold(name)];
+  if (native && rest.map(fold).filter(Boolean).every((p) => p === native[1].toLowerCase() || regionNames(p).includes(fold(native[2])))) {
+    name = native[0];
+    if (!rest.filter(Boolean).length) rest = [native[2]];
+  }
   // Each part after the name must fit the city: "Austin, TX, USA" is Texas and the United States.
   const parts = rest.map(fold).filter(Boolean);
-  // A big city typed in its own language that Open-Meteo doesn't find by that name (only "Roma, Texas" stays Roma).
-  const native = NATIVE[fold(name)];
-  if (native && parts.every((p) => p === native[1].toLowerCase() || regionNames(p).includes(fold(native[2])))) (name = native[0]), (whole = undefined);
+  // Directions dropped from a region that isn't itself a known one ("North Carolina" keeps its North).
+  const plain = parts.map((p) => (KNOWN_REGIONS.has(p) ? p : undirected(p)));
   const seen = new Set<unknown>();
   let list: any[] = [];
   const idOf = (r: any) => r.id ?? [r.name, r.admin1, r.country_code, r.latitude, r.longitude].join("|");
@@ -294,28 +309,29 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
     );
   };
   const byCode = (r: any, part: string) => byName(r, part) || (part.length === 2 && part === fold(r.country_code));
+  const fitsParts = (r: any) => parts.every((p) => byCode(r, p)) || plain.every((p) => byCode(r, p));
   const typedNames = new Set([canon(name)]); // the typed name, and the Nordic spelling found for it (below)
   const exact = (r: any) => typedNames.has(canon(r.name));
   // French saints are filed with hyphens ("Saint-Étienne", "Saint-Malo"): asked for only when no spelling found
   // a place of exactly the typed name that fits what came after the comma.
   const saint = name.match(/^(st|saint)\.?\s+(.+)$/i);
-  if (saint && !list.some((r) => exact(r) && parts.every((p) => byCode(r, p)))) {
+  if (saint && !list.some((r) => exact(r) && fitsParts(r))) {
     const hyphen = `Saint-${saint[2].trim().replace(/\s+/g, "-")}`;
     for (const r of await geocode(budget, hyphen, "en")) if (canon(r.name) === canon(hyphen) && !seen.has(idOf(r))) (seen.add(idOf(r)), list.push(r));
   }
   // A one-word name typed without ø, æ or ı (above) is asked again with them when no town of exactly that name fits,
-  // and the text names no country or a Nordic (Turkish) one. Places of exactly the new spelling are kept, or else the
+  // and the text names no country or a Nordic (Turkish) one or region. Places of exactly the new spelling are kept, or else the
   // first answer when it has people (the geocoder answers "Helsingør" with its English name, Elsinore, and "Rødovre"
   // with Rødovre Municipality; not an airport or a glacier).
   const town = (r: any) => /^PPL/.test(String(r.feature_code ?? "PPL"));
-  if (!/\s/.test(name) && !list.some((r) => exact(r) && town(r) && parts.every((p) => byCode(r, p)))) {
-    const nordic = !parts.length || parts.some((p) => NORDIC.has(p));
-    const turkish = !parts.length || parts.some((p) => TURKISH.has(p));
+  if (!/\s/.test(name) && !list.some((r) => exact(r) && town(r) && fitsParts(r))) {
+    const nordic = !parts.length || plain.some((p) => NORDIC.has(p));
+    const turkish = !parts.length || plain.some((p) => TURKISH.has(p));
     for (const n of respellings(name, nordic, turkish)) {
       const answer = await geocode(budget, n, "en");
       const same = answer.filter((r) => canon(r.name) === canon(n));
       const found = (same.length ? same : answer.slice(0, 1).filter((r) => r.population > 0)).filter((r) => !seen.has(idOf(r)));
-      if (!found.some((r) => parts.every((p) => byCode(r, p)))) continue;
+      if (!found.some(fitsParts)) continue;
       for (const r of found) (seen.add(idOf(r)), list.push(r), typedNames.add(canon(r.name)));
       break;
     }
@@ -325,11 +341,12 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
     const named = list.filter((r) => ps.every((p) => byName(r, p)));
     return named.length ? named : list.filter((r) => ps.every((p) => byCode(r, p)));
   };
-  const plain = parts.map((p) => (KNOWN_REGIONS.has(p) ? p : undirected(p))); // "North Carolina" keeps its North
+  let undirectedFit = false; // the region fit only with its direction dropped: flagged
   const fits = () => {
     if (!parts.length) return [];
     const typedFit = fitting(parts);
-    return typedFit.length || plain.every((p, i) => p === parts[i]) ? typedFit : fitting(plain);
+    undirectedFit = !typedFit.length && !plain.every((p, i) => p === parts[i]);
+    return undirectedFit ? fitting(plain) : typedFit;
   };
   const pop = (r: any) => r.population ?? 0;
   let matches = fits();
@@ -339,17 +356,13 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   // places of exactly the typed name that fit (asking for 100 every time made Porto Porto Alegre); one of those is
   // taken over a place of another name unless that one is over 10 times bigger ("Saigon" finds Ho Chi Minh City).
   if (parts.length && !matches.some(exact)) {
-    const more = (await geocode(budget, name, "en", 100)).filter((r) => exact(r) && (parts.every((p) => byCode(r, p)) || plain.every((p) => byCode(r, p))) && !seen.has(idOf(r)));
+    const more = (await geocode(budget, name, "en", 100)).filter((r) => exact(r) && fitsParts(r) && !seen.has(idOf(r)));
     if (more.length) (list.push(...more), (matches = fits()));
     const named = matches.filter(exact);
     const biggest = Math.max(0, ...named.map(pop));
     if (named.length && !matches.some((r) => !exact(r) && pop(r) > 10 * biggest)) matches = named;
   }
-  // Nothing typed after the name: a town of exactly that name beats a place whose name goes on from it inside a word
-  // ("Cobh" was Cobham), but not one that adds a word (Ibiza Town, Washington D.C.) or that the geocoder found under
-  // another name ("Derry" is Londonderry, "Calcutta" Kolkata).
-  const extended = (r: any) => !exact(r) && canon(r.name).startsWith(canon(name)) && /^[\p{L}\p{N}]/u.test(canon(r.name).slice(canon(name).length));
-  const pool = matches.length ? matches : parts.length || !list.some((r) => exact(r) && town(r)) ? list : list.filter((r) => !extended(r));
+  const pool = matches.length ? matches : list;
   // Towns and cities first (Open-Meteo lists Vancouver Island above the city of Vancouver), unless an island
   // or region is far bigger than any town of that name (Long Island, Maui).
   const byPop = (xs: any[]) => [...xs].sort((a, b) => pop(b) - pop(a))[0];
@@ -366,7 +379,7 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   const label = `${cityName}${region ? ", " + region : ""}`;
   const typedRegion = rest.filter(Boolean).join(", ");
   // Open-Meteo leaves out a coordinate that is exactly 0 (Stratford, London has no longitude).
-  const out: Place = { lat: r.latitude ?? 0, lon: r.longitude ?? 0, name: label, query: label, ...(r.country_code ? { country: String(r.country_code) } : {}), ...(r.population ? { population: Number(r.population) } : {}), ...(typedRegion && !matches.length ? { unmatched: typedRegion } : {}) };
+  const out: Place = { lat: r.latitude ?? 0, lon: r.longitude ?? 0, name: label, query: label, ...(r.country_code ? { country: String(r.country_code) } : {}), ...(r.population ? { population: Number(r.population) } : {}), ...(typedRegion && (!matches.length || undirectedFit) ? { unmatched: typedRegion } : {}) };
   await kvPut(cache, budget, key, out, 60 * 60 * 24 * 30);
   return out;
 }

@@ -2800,11 +2800,6 @@ null
 null
 ],
 [
-"Cobh",
-"Cobh, Ireland",
-null
-],
-[
 "Tonsberg",
 "Tønsberg, Norway",
 null
@@ -2822,12 +2817,12 @@ null
 [
 "Bangor, North Wales",
 "Bangor, Wales",
-null
+"North Wales"
 ],
 [
 "Santa Rosa, Northern California",
 "Santa Rosa, California",
-null
+"Northern California"
 ],
 [
 "Columbia, North Carolina",
@@ -2843,5 +2838,125 @@ null
 "Kiev, UA",
 "Kyiv, Ukraine",
 null
+],
+[
+"Brussel",
+"Brussels, Belgium",
+null
+],
+[
+"Rom",
+"Rome, Italy",
+null
+],
+[
+"Prag",
+"Prague, Czechia",
+null
+],
+[
+"Belgrad",
+"Belgrade, Serbia",
+null
+],
+[
+"Algier",
+"Algiers, Algeria",
+null
+],
+[
+"Tromso, Northern Norway",
+"Tromsø, Norway",
+"Northern Norway"
+],
+[
+"Diyarbakir, Eastern Turkey",
+"Diyarbakır, Republic of Türkiye",
+"Eastern Turkey"
+],
+[
+"Tonsberg, Southern Norway",
+"Tønsberg, Norway",
+"Southern Norway"
+],
+[
+"Forde, Western Norway",
+"Førde, Norway",
+"Western Norway"
+],
+[
+"Forde, Vestland",
+"Førde, Norway",
+null
+],
+[
+"Venezia",
+"Venice, Italy",
+null
+],
+[
+"Bruxelles, Belgique",
+"Brussels, Belgium",
+null
+],
+[
+"Kiev, Ukraina",
+"Kyiv, Ukraine",
+null
+],
+[
+"Koge, Sjaelland",
+"Køge, Denmark",
+null
+],
+[
+"Helsingor, Hovedstaden",
+"Elsinore, Denmark",
+null
+],
+[
+"Newport, West Wales",
+"Newport, Wales",
+"West Wales"
+],
+[
+"Perth, East Scotland",
+"Perth, Scotland",
+"East Scotland"
+],
+[
+"Perth, Central Scotland",
+"Perth, Scotland",
+"Central Scotland"
+],
+[
+"Cardiff, South Wales",
+"Cardiff, Wales",
+"South Wales"
+],
+[
+"Bandirma, TR",
+"Bandırma, Republic of Türkiye",
+null
+],
+[
+"Diyarbakir, Türkiye",
+"Diyarbakır, Republic of Türkiye",
+null
+],
+[
+"Trondheim, Trondelag",
+"Trondheim, Norway",
+null
+],
+[
+"Cardiff, South East Wales",
+"Cardiff, Wales",
+"South East Wales"
+],
+[
+"St Ives, West Cornwall",
+"St Ives, England",
+"West Cornwall"
 ]
 ]

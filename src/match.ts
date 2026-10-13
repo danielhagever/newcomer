@@ -347,8 +347,11 @@ export async function matchNeighborhoods(
       // searches. A far area is said by its distance, even when its description names the city.
       const wrong = offBy > 50 ? `${Math.round(offBy)} km from the located city` : part ? `only ${part}, a part of it` : "";
       const why = !heat.points.length ? `was empty${wrong ? ` and ${wrong}` : ""}` : `was ${wrong}`;
-      trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" ${why}; asked again for 25 km around the city centre` });
-      const circle = { lat: center.lat, lon: center.lon, radiusM: 25000 };
+      // As far as the city reaches (its population), not a fixed 25 km: "Huntington, Virginia" read 232 km away then
+      // showed Washington's Georgetown and Adams Morgan as Huntington's (pass 47), Hoboken's class.
+      const radiusKm = cityRadiusKm(center.population);
+      trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" ${why}; asked again for ${radiusKm} km around the city centre` });
+      const circle = { lat: center.lat, lon: center.lon, radiusM: radiusKm * 1000 };
       // The city-wide place lookups below go there too when Qloo's city was wrong, not when only its map was empty
       // (an empty map says nothing about the city: Mexico City's places then came from 25 km around, live).
       if (part || offBy > 50) around = circle;
@@ -435,7 +438,7 @@ export async function matchNeighborhoods(
       const wrong = offBy > 50 ? `was ${Math.round(offBy)} km from the located city` : part ? `was only ${part}, a part of it` : `had none of these places${locality ? ` (read as ${locality.name.split(",")[0]})` : ""}`;
       // An empty search is widened only as far as the city reaches (its population: Napa 3 km, Perth and Moscow 25), so a
       // county named after it doesn't bring in its neighbours (live: Napa County's ramen were in Fairfield and Vallejo).
-      const radiusKm = part || offBy > 50 ? 25 : cityRadiusKm(center.population);
+      const radiusKm = cityRadiusKm(center.population);
       trace.push({ step: "Check", detail: `Qloo's area for "${center.query}" ${wrong}; asked again for ${radiusKm} km around the city centre` });
       around = { lat: center.lat, lon: center.lon, radiusM: radiusKm * 1000 };
       qlooCity = undefined; // the part isn't the city (live: "Qloo read the city as Minato, Tokyo, ...")

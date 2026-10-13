@@ -775,7 +775,7 @@ test("with only food and activity tastes, a part of the city is asked again arou
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]);
     assert.equal(r.mode, "places");
     const cityWide = m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags"));
-    assert.deepEqual(cityWide.map((c) => c.params.get("filter.location.radius")), [null, "25000"], "a part is asked for 25 km, as the map is");
+    assert.deepEqual(cityWide.map((c) => c.params.get("filter.location.radius")), [null, "10000"], "a part is asked as far as the city reaches (Austin's people: 10 km), as the map is");
     assert.ok(r.trace.some((t) => /was only Hyde Park, a part of it/.test(t.detail)));
     assert.equal(r.qlooCity, undefined, "the part isn't shown as the city (live: Minato)");
     assert.ok(r.trace.some((t) => t.detail.startsWith("Qloo found 1 place that matches your food and activity tastes")), "one place, said so (Kyoto, live: \"1 places\")");
@@ -797,7 +797,7 @@ test("with only food and activity tastes, a city Qloo reads over 50 km away is a
       assert.equal(cityWide.length, asked, d);
       if (asked === 2) {
         assert.ok(cityWide[1].params.get("filter.location.radius"));
-        assert.ok(r.trace.some((t) => /was 1\d{3} km from the located city; asked again for 25 km around/.test(t.detail)), JSON.stringify(r.trace));
+        assert.ok(r.trace.some((t) => /was 1\d{3} km from the located city; asked again for 10 km around/.test(t.detail)), JSON.stringify(r.trace));
         assert.equal(r.qlooCity, undefined);
       }
     } finally {
@@ -863,7 +863,7 @@ test("an empty map says nothing about a place named after the city, and a circle
   let m = mockFetch(standardQloo({ heat: (c) => (c.params.get("filter.location.query") ? heatmap(AUSTIN.latitude, AUSTIN.longitude, 0, 8, fair) : undefined) }));
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
-    assert.ok(r.trace.some((t) => t.detail === `Qloo's area for "Austin, Texas" was empty; asked again for 25 km around the city centre`), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(r.trace.some((t) => t.detail === `Qloo's area for "Austin, Texas" was empty; asked again for 10 km around the city centre`), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     m.restore();
   }
@@ -875,7 +875,7 @@ test("an empty map says nothing about a place named after the city, and a circle
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]);
     assert.equal(r.mode, "map");
-    assert.deepEqual(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags") && c.params.get("filter.location.radius") !== "1200").map((c) => c.params.get("filter.location.radius")), ["25000"]);
+    assert.deepEqual(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags") && c.params.get("filter.location.radius") !== "1200").map((c) => c.params.get("filter.location.radius")), ["10000"]);
     assert.ok(!r.trace.some((t) => /none of your kinds of places/.test(t.detail)));
   } finally {
     m.restore();
@@ -883,7 +883,7 @@ test("an empty map says nothing about a place named after the city, and a circle
   m = mockFetch(noRamen(true)); // the circle's map is empty too: only the ramen places could rank the areas
   try {
     await assert.rejects(matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }, { name: "ramen", kind: "tag" }]), /Qloo has no places in Austin/);
-    assert.deepEqual(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags")).map((c) => c.params.get("filter.location.radius")), ["25000"]);
+    assert.deepEqual(m.calls.filter((c) => isPlaces(c) && c.params.get("filter.tags")).map((c) => c.params.get("filter.location.radius")), ["10000"]);
   } finally {
     m.restore();
   }
@@ -1259,7 +1259,8 @@ test("Qloo's locality is shown, and one far from the located city is asked again
     const heat = m.calls.filter(isHeat);
     assert.equal(heat[0].params.get("filter.location.query"), "Austin, Texas");
     assert.equal(heat[1].params.get("filter.location"), `POINT(${AUSTIN.longitude} ${AUSTIN.latitude})`);
-    assert.equal(heat[1].params.get("filter.location.radius"), "25000");
+    // As far as the city reaches, not a fixed 25 km (pass 47: Huntington, Virginia showed Washington's neighborhoods).
+    assert.equal(heat[1].params.get("filter.location.radius"), "10000");
     assert.ok(r.trace.some((t) => t.step === "Check"));
     assert.equal(r.qlooCity, "Austin, Travis County, Texas, United States");
   } finally {

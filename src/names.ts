@@ -8,17 +8,16 @@ import { normalizeName, type Entity } from "./qloo.ts";
 // Only a leading article is dropped ("The Empty Bottle" is Empty Bottle), and "&" is "and"; "of" stays,
 // since of Montreal isn't Montreal.
 const ARTICLES = new Set(["the", "a", "an"]);
-const FOLD: Record<string, string> = { "\u00f8": "o", "\u00e6": "ae", "\u0153": "oe", "\u00df": "ss", "\u0142": "l", "\u0111": "d", "\u00fe": "th" };
+// Letters with no accent to drop, written plain: ø, æ, œ, ß, ł, đ, þ, and the Turkish dotless ı and Icelandic ð.
+const FOLD: Record<string, string> = { "\u00f8": "o", "\u00e6": "ae", "\u0153": "oe", "\u00df": "ss", "\u0142": "l", "\u0111": "d", "\u00fe": "th", "\u0131": "i", "\u00f0": "d" };
+export const plainLetters = (s: string) => s.replace(/[\u00f8\u00e6\u0153\u00df\u0142\u0111\u00fe\u0131\u00f0]/g, (c) => FOLD[c]);
 // Accents are folded ("Beyonce" is Beyoncé); apostrophes, colons and dots join ("Cat's" is "Cats", "9:30"
 // is "930"); other punctuation separates words.
 const SPELLING: Record<string, string> = { theater: "theatre", amphitheater: "amphitheatre", centre: "center", ave: "avenue", blvd: "boulevard" };
 // Letters written as signs read as letters: P!nk is Pink (between consonants only: GO!GO!7188 is "go go"),
 // Ke$ha is Kesha, Joey Bada$$ is Badass, $uicideboy$ is Suicideboys.
 const allWords = (s: string) =>
-  normalizeName(s)
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .replace(/[\u00f8\u00e6\u0153\u00df\u0142\u0111\u00fe]/g, (c) => FOLD[c])
+  plainLetters(normalizeName(s).normalize("NFKD").replace(/\p{M}/gu, ""))
     .replace(/(?<=[b-df-hj-np-tv-z])!(?=[b-df-hj-np-tv-z])/g, "i")
     .replace(/\$+(?=\p{L})|(?<=\p{L})\$+/gu, (m) => "s".repeat(m.length))
     .replace(/[&+]/g, " and ") // "Florence + the Machine", "Simon & Garfunkel"

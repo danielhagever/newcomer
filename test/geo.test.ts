@@ -1,11 +1,14 @@
-// City lookup against 569 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 592 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
 // "Windsor, Berkshire" (filed under Windsor and Maidenhead: Windsor, Ontario, flagged), "Derry, Ireland" (filed as
-// Londonderry), "Lorenskog" (no Lørenskog at all), "Ennis" alone (the geocoder ranks Surprise, Arizona first for it;
-// "Ennis, Co. Clare" works), "Bodo" alone (Bodo in Chad is a town of that name), a native city name with a region
-// that isn't its country ("Roma, Lazio")
+// Londonderry), "Lorenskog" (no Lørenskog at all), "Ennis" and "Cobh" alone (the geocoder ranks Surprise,
+// Arizona, and Cobham first; with the county they work: a name alone is never preferred, as "Brussel" is Brussels and
+// "Derry" Londonderry), "Bodo" alone (Bodo in Chad is a town of that name), a native city name with a region
+// that isn't its country ("Roma, Lazio"), "Newcastle, North East England" (the geocoder's Newcastle upon Tyne goes by
+// that name only: an alias reaches it from "Newcastle, UK" or "Newcastle, England"), "Ayvalik, Turkey" and "Bakirkoy,
+// Turkey" (filed as Aivali and under Istanbul: a village of the name is found)
 // (Oahu, Kauai, Big Island and "Newcastle, UK/England" are now aliases in city.ts); and the ambiguous bare names
 // Newcastle, Victoria, Hong Kong, St Andrews, St Malo / Saint Malo (Manitoba, or a French village: Open-Meteo
 // gives Saint-Malo itself no population), Prince Edward Island. Run: npm test
@@ -21,7 +24,7 @@ const FIX: Record<string, unknown[]> = Object.fromEntries(
 );
 const CASES: [string, string, string | null][] = JSON.parse(readFileSync(new URL("./geo-cases.json", import.meta.url), "utf8"));
 
-test("city lookup: 569 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 592 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -47,7 +50,7 @@ test("city lookup: 569 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 569);
+  assert.equal(CASES.length, 592);
   assert.deepEqual(wrong, []);
 });
 
@@ -149,7 +152,23 @@ test("a direction typed before a region is dropped only when nothing fits with i
     assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Testburg, South Upland"))?.lat, 20, "Upland, the biggest that fits without South");
     const coast = await cityCenter(memoryKV().kv, new Budget(48), "Testburg, West Coast");
     assert.equal(coast?.lat, 30, "found among 100 by the region without its direction");
-    assert.equal(coast?.unmatched, undefined);
+    assert.equal(coast?.unmatched, "West Coast", "flagged: the direction itself wasn't matched");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("a region typed with plain letters fits one written with ø, æ, ı or ð", async () => {
+  const R = (admin1: string, country: string, country_code: string, latitude: number) => ({ name: "Testby", admin1, country, country_code, population: 900, feature_code: "PPL", latitude, longitude: 0 });
+  const TEN = [R("Kırşehir", "Republic of Türkiye", "TR", 39), R("Suðurland", "Iceland", "IS", 64), R("Møre og Romsdal", "Norway", "NO", 62), R("Ohio", "United States", "US", 40)];
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ results: TEN }), { headers: { "content-type": "application/json" } })) as typeof fetch;
+  try {
+    for (const [typed, lat] of [["Testby, Kirsehir", 39], ["Testby, Sudurland", 64], ["Testby, More og Romsdal", 62]] as const) {
+      const p = await cityCenter(memoryKV().kv, new Budget(48), typed);
+      assert.equal(p?.lat, lat, typed);
+      assert.equal(p?.unmatched, undefined, typed);
+    }
   } finally {
     globalThis.fetch = original;
   }
