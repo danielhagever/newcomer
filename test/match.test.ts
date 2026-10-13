@@ -478,7 +478,7 @@ test("only the country acts: an area whose places Qloo files mostly abroad is le
   });
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
-    assert.ok(r.trace.some((t) => t.step === "Filter" && t.detail === "Left out 1 area across the border (Qloo files its places in another country: Mexico)"), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(r.trace.some((t) => t.step === "Filter" && t.detail === "Left out 1 area across the border (in another country: Mexico)"), JSON.stringify(r.trace.map((t) => t.detail)));
     const shown = r.neighborhoods.flatMap((h) => h.evidence.map((e) => e.name));
     assert.ok(!shown.includes("Across Bar") && !shown.includes("Border Grill"), shown.join(", "));
     assert.ok(shown.includes("Home Cafe") && shown.includes("Unfiled Diner"), "a place with no country stays");
@@ -511,6 +511,29 @@ test("only the country acts: an area whose places Qloo files mostly abroad is le
       mm.restore();
     }
   }
+  // An area with places on both sides is where OpenStreetMap puts its centre (pass 52: Kreuzlingen's Swiss areas, most of
+  // whose places within reach are Konstanz's; Juárez's riverside, which is El Paso's), asked only for such an area.
+  for (const [what, osmCountry, placesAt, dropped] of [["Kreuzlingen's kind", "US", ["MX", "MX", "US"], false], ["El Paso's riverside kind", "MX", ["US", "US", "MX"], true]] as const) {
+    let firstArea = true;
+    const om = mockFetch((c) => {
+      if (c.host === "photon.komoot.io") return { body: { features: [{ properties: { district: "OSM Place", countrycode: osmCountry } }] } };
+      if (isPlaces(c) && !c.params.get("filter.tags")) {
+        const p = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+        const mine = firstArea;
+        firstArea = false;
+        const codes = mine ? placesAt : ["US"];
+        return { body: { results: { entities: codes.map((cc, i) => filed(place(`k${i}${p[2]}`, `Spot ${i}`, "Somewhere", +p[2], +p[1], ["Bar"], ["Evening"]), cc)) } } };
+      }
+      return standardQloo()(c);
+    });
+    try {
+      const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+      assert.equal(r.trace.some((t) => /across the border \(in another country: Mexico\)/.test(t.detail)), dropped, what);
+      assert.equal(om.calls.filter((c) => c.host === "photon.komoot.io" && c.params.get("lat")).length >= 1, true, "asked for the mixed area");
+    } finally {
+      om.restore();
+    }
+  }
   // A territory is its country's: San Juan's places filed as the US stay (Qloo files Puerto Rico as the US, live); a city
   // with no country keeps every place; and when every area is abroad the search says so, not "try again later".
   const sanJuan = { ...AUSTIN, name: "San Juan", admin1: "San Juan", country: undefined, country_code: "PR" };
@@ -532,7 +555,7 @@ test("only the country acts: an area whose places Qloo files mostly abroad is le
         // How the city was read is said, as Booker says it (pass 50).
         if (what === "San Juan") assert.ok(r.trace.some((t) => t.step === "Check" && t.detail === '"Austin, Texas" was read as San Juan, Puerto Rico; "Texas" didn\'t match its state or country, so check this is the city you meant.'), JSON.stringify(r.trace.map((t) => t.detail)));
       }
-      else await assert.rejects(search, (e: AppError) => e.status === 404 && /are all across the border \(Qloo files their places in another country: Mexico\)/.test(e.message), what);
+      else await assert.rejects(search, (e: AppError) => e.status === 404 && /are all across the border \(in another country: Mexico\)/.test(e.message), what);
     } finally {
       g.restore();
     }

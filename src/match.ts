@@ -493,21 +493,27 @@ export async function matchNeighborhoods(
     hoods = hoods.filter((h) => !airport(h));
     trace.push({ step: "Filter", detail: `Left out ${atAirports} area${atAirports === 1 ? "" : "s"} at an airport` });
   }
-  // Judged by all the places within reach, not only those inside the area's own square: one place there decided
-  // (pass 51: Juárez's top area became El Paso's riverside for the bridge in it; Windsor lost its riverfront to
-  // Detroit's Renaissance Center). Beausoleil, whose places within reach are all Monaco's, is a known limit.
+  // An area's country is where it is: OpenStreetMap at its centre, asked only for an area holding places on both sides.
+  // Neither its places within reach (pass 52: Kreuzlingen's Swiss areas were Konstanz's, Windsor's riverfront
+  // Detroit's) nor those inside its square (pass 51: one bridge made El Paso's riverside Juárez's) can tell. Where
+  // OpenStreetMap doesn't answer, most places within reach decide.
+  const mixed = hoods.filter((h) => [...h.evidence, ...h.matches].some((e) => !home(e)));
+  const osm = mixed.length ? await namesFor(env.CACHE, budget, center.name, mixed, 3) : undefined;
+  if (osm?.failed) degraded = true; // decided by the places this time: not kept for the day
+  const osmCountry = (h: Neighborhood) => osm?.countries.get(cellKey(h.lat, h.lon));
   const placesAbroad = (h: Neighborhood) => {
+    const at = osmCountry(h);
+    if (at) return nation(at) !== nation(center.country);
     const ps = [...h.evidence, ...h.matches];
     return ps.filter((e) => !home(e)).length * 2 > ps.length;
   };
   const across = hoods.filter(placesAbroad);
   if (across.length) {
     hoods = hoods.filter((h) => !placesAbroad(h));
-    const where = [...new Set(across.flatMap((h) => [...h.evidence, ...h.matches].filter((e) => !home(e)).map((e) => countryName(e.countryCode!))))].join(" and ");
-    const its = across.length === 1 ? "its" : "their";
-    trace.push({ step: "Filter", detail: `Left out ${across.length} area${across.length === 1 ? "" : "s"} across the border (Qloo files ${its} places in another country: ${where})` });
+    const where = [...new Set(across.flatMap((h) => (osmCountry(h) ? [osmCountry(h)!] : [...h.evidence, ...h.matches].filter((e) => !home(e)).map((e) => e.countryCode!)).map(countryName)))].join(" and ");
+    trace.push({ step: "Filter", detail: `Left out ${across.length} area${across.length === 1 ? "" : "s"} across the border (in another country: ${where})` });
     // Not "try again later": every area Qloo ranks is another country's, which asking again won't change.
-    if (!hoods.length) throw new AppError(`The ${across.length === 1 ? "area" : "areas"} Qloo ranks highest around ${center.name} for these tastes ${across.length === 1 ? "is" : "are all"} across the border (Qloo files ${its} places in another country: ${where}), so none is shown as the city's. Try a nearby city or other tastes.`, 404);
+    if (!hoods.length) throw new AppError(`The ${across.length === 1 ? "area" : "areas"} Qloo ranks highest around ${center.name} for these tastes ${across.length === 1 ? "is" : "are all"} across the border (in another country: ${where}), so none is shown as the city's. Try a nearby city or other tastes.`, 404);
   }
   for (const h of hoods) (h.evidence = h.evidence.filter(home)), (h.matches = h.matches.filter(home));
   // Where Qloo files most places inside an area under the city's own name and the area is at the city's centre, it is
@@ -528,10 +534,11 @@ export async function matchNeighborhoods(
   for (const h of hoods) h.name = says(h.name) ? clean(h.name) : h.name && cityWords.has(cityKey(clean(h.name))) && km(h, center) <= 1.5 ? centreName : "";
   const unnamed = hoods.filter((h) => !h.name);
   if (unnamed.length) {
-    const r = await namesFor(env.CACHE, budget, center.name, unnamed, 3);
+    // The areas asked about their country above already have OpenStreetMap's names.
+    const r = await namesFor(env.CACHE, budget, center.name, unnamed.filter((h) => !osm?.names.has(cellKey(h.lat, h.lon))), 3);
     for (const h of unnamed) {
-      const osm = (r.names.get(cellKey(h.lat, h.lon)) ?? []).find(says);
-      h.name = osm ? clean(osm) : byPlaces([...h.evidence, ...h.matches]);
+      const osmName = (osm?.names.get(cellKey(h.lat, h.lon)) ?? r.names.get(cellKey(h.lat, h.lon)) ?? []).find(says);
+      h.name = osmName ? clean(osmName) : byPlaces([...h.evidence, ...h.matches]);
     }
     // A lookup Photon didn't answer may name the area next time: the answer isn't cached.
     if (r.failed) degraded = true;

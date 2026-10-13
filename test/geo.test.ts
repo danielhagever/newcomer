@@ -1,4 +1,4 @@
-// City lookup against 652 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 669 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
@@ -11,8 +11,8 @@
 // Turkey" (filed as Aivali and under Istanbul: a village of the name is found), "Hamilton, North Island" (no region of
 // that name: a Hamilton in Rhode Island, another country, flagged), "Arlington, NoVA" ("Nova" is in Nova Scotia),
 // "Union City, North Jersey" and "Halifax, West Yorkshire" (filed under Calderdale), flagged; one-letter directions
-// ("Charleston, W. Virginia"), a direction as its own part ("Naples, SW, Florida"), a country in brackets or after a
-// "Bethlehem, West Bank", airports the geocoder files under the typed name ("Raleigh-Durham, NC", "Dallas/Fort
+// ("Charleston, W. Virginia"), a direction as its own part ("Naples, SW, Florida"), a county with its country in
+// brackets ("Dover, Kent (UK)"), "Bethlehem, West Bank", airports the geocoder files under the typed name ("Raleigh-Durham, NC", "Dallas/Fort
 // Worth"), "Laayoune, Morocco", "Dakhla, Morocco" and "Bethlehem, Israel" (the geocoder files the cities under Western
 // Sahara and Palestine: a village of the name fits the typed country), a city, state and country with no commas
 // ("Salem MA USA"), and a region with a direction or county before its country with no comma ("Vernon, Okanagan
@@ -32,7 +32,7 @@ const FIX: Record<string, unknown[]> = Object.fromEntries(
 );
 const CASES: [string, string, string | null][] = JSON.parse(readFileSync(new URL("./geo-cases.json", import.meta.url), "utf8"));
 
-test("city lookup: 652 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 669 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -58,7 +58,7 @@ test("city lookup: 652 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 652);
+  assert.equal(CASES.length, 669);
   assert.deepEqual(wrong, []);
 });
 

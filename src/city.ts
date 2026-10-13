@@ -39,7 +39,7 @@ const OTHER_REGIONS: Record<string, string[]> = {
   nyc: ["New York"], // "Brooklyn, NYC"
 };
 // The UK's nations are regions (admin1), not the whole UK: "Bangor, Wales" isn't Bangor in Northern Ireland.
-const COUNTRY_WORDS: Record<string, string> = { usa: "us", "united states": "us", us: "us", uk: "gb", "united kingdom": "gb", czech: "cz", "czech republic": "cz" };
+const COUNTRY_WORDS: Record<string, string> = { usa: "us", "united states": "us", "united states of america": "us", us: "us", uk: "gb", "united kingdom": "gb", czech: "cz", "czech republic": "cz" };
 // Territories, whose records carry no country name: their own name, and the country they belong to (Qloo files
 // Puerto Rico's rooms as the US and Hong Kong's as China, live). "Ponce, Puerto Rico" landed in Cuba without this.
 // Palestine's and Western Sahara's records have no country name either, and count as themselves ("Bethlehem,
@@ -256,21 +256,24 @@ function respellings(name: string, nordic: boolean, turkish: boolean): string[] 
 }
 
 export async function cityCenter(cache: KVNamespace, budget: Budget, city: string): Promise<Place | null> {
-  const key = `city27:${city.toLowerCase()}`; // city27: signs in a region are spaces, nicknames with further parts
+  const key = `city28:${city.toLowerCase()}`; // city28: quotes and accents, ZIPs, "City ST, Country", parts set aside
   const hit = await kvGet(cache, budget, key);
   if (hit) return hit as Place;
   // The typed parts, cleaned once before any step reads them: "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK";
   // in a region, signs other than dots, hyphens and apostrophes are spaces ("NC?", "Maine (USA)", "ME/USA"); a part with
   // no letter or digit is left out ("Venice,.", "Venice, -"); "MA USA" is two parts.
+  // Quotes are one apostrophe ("Hawai‘i", "Hawaiʻi"), and accents stay, even typed apart; in a region "&" is "and", a
+  // spaced dash or a number (a ZIP code) is a gap.
   const typedList = city
+    .replace(/[\u2018\u2019\u02bb`]/g, "'")
     .split(",")
-    .map((x, i) => (i ? x.replace(/[^\p{L}\p{N}\s.'\u2019-]/gu, " ") : x).replace(/\s+/g, " ").trim())
+    .map((x, i) => (i ? x.replace(/&/g, " and ").replace(/\s-\s|\b\d+\b/g, " ").replace(/[^\p{L}\p{M}\p{N}\s.'-]/gu, " ") : x).replace(/\s+/g, " ").trim())
     .filter((x) => /[\p{L}\p{N}]/u.test(x))
     .flatMap((x, i) => (i ? splitRegion(x) : [x]));
   // A nickname typed with its region, then any further parts ("Newcastle, England, UK" is Newcastle upon Tyne). A name
   // alone is a nickname further down, where the typed region wins ("KC, Kansas" is Kansas City, Kansas).
   const alias = typedList.length > 1 ? ALIASES[fold(typedList.slice(0, 2).join(", "))] : undefined;
-  const typed = (alias ? [alias, ...typedList.slice(2)] : typedList).join(", ").replace(/[\u2018\u2019]/g, "'");
+  const typed = (alias ? [alias, ...typedList.slice(2)] : typedList).join(", ");
   let [name, ...rest] = typed.split(",").map((x) => x.trim());
   if (!name) return null;
   // A nickname before the comma too: "Quebec City, QC", "Bangalore, India", "Washington DC, USA" (and, below,
@@ -284,16 +287,16 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   };
   unalias();
   let whole: any[] | undefined; // the answer for the whole name, when it was already asked for
-  // Without a comma the state or country may close the text ("Austin TX", "Portland Maine", "London
-  // England"), but a city's own name may end in one too ("New Britain", "Port Washington", "West New York"):
-  // the whole name is kept when Open-Meteo has a place with exactly that name.
-  if (!rest.length) {
+  // The state or country may close the name, before a comma or none ("Austin TX", "Portland Maine", "Portland ME,
+  // USA"), but a city's own name may end in one too ("New Britain", "Port Washington", "West New York"): the whole name
+  // is kept when Open-Meteo has a place with exactly that name.
+  {
     const ws = name.split(/\s+/);
     const k = [3, 2, 1].find((k) => ws.length > k && KNOWN_REGIONS.has(fold(ws.slice(-k).join(" "))));
     if (k) {
       whole = await geocode(budget, name, "en");
       if (!whole.some((r) => fold(r.name) === fold(name))) {
-        rest = [ws.slice(-k).join(" ")];
+        rest = [ws.slice(-k).join(" "), ...rest];
         name = ws.slice(0, -k).join(" ");
         whole = undefined;
         unalias();
@@ -413,6 +416,18 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
     const biggest = Math.max(0, ...named.map(pop));
     if (named.length && !matches.some((r) => !exact(r) && pop(r) > 10 * biggest)) matches = named;
   }
+  // One part that fits nothing, even among 100, doesn't throw away the parts that fit ("Venice, Italy, Europe" was
+  // Dayton, Ohio): it is set aside and flagged ("Europe", "Narnia").
+  let setAside: number[] = [];
+  if (parts.length && !matches.length) {
+    const fitsSome = parts.map((_, j) => list.some((r) => levels.some((ps) => byCode(r, ps[j]))));
+    for (const [i, ps] of fitsSome.some(Boolean) ? levels.entries() : []) {
+      const found = fitting(ps.filter((_, j) => fitsSome[j]));
+      if (!found.length) continue;
+      (matches = found), (fitLevel = i), (setAside = parts.map((_, j) => j).filter((j) => !fitsSome[j]));
+      break;
+    }
+  }
   const pool = matches.length ? matches : list;
   // Towns and cities first (Open-Meteo lists Vancouver Island above the city of Vancouver), unless an island
   // or region is far bigger than any town of that name (Long Island, Maui).
@@ -429,11 +444,13 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   const cityName = r.country_code === "CA" && fold(r.name) === "quebec" && fold(r.admin1) === "quebec" ? `${r.name} City` : r.name;
   const label = `${cityName}${region ? ", " + region : ""}`;
   const typedRegion = rest.join(", ");
+  // What is flagged: all that was typed when nothing fit or directions were dropped, else the parts set aside.
+  const flag = !matches.length || (fitLevel && !setAside.length) ? typedRegion : setAside.map((j) => rest[j]).join(", ");
   // The typed words left once directions were dropped ("Western North Carolina" as "North Carolina").
   const words = (s: string) => s.trim().split(/[\s-]+/);
   const shownAs = (ps: string[]) => rest.map((typedPart, i) => words(typedPart).slice(words(typedPart).length - words(ps[i]).length).join(" ")).join(", ");
   // Open-Meteo leaves out a coordinate that is exactly 0 (Stratford, London has no longitude).
-  const out: Place = { lat: r.latitude ?? 0, lon: r.longitude ?? 0, name: label, query: label, ...(r.country_code ? { country: String(r.country_code) } : {}), ...(r.population ? { population: Number(r.population) } : {}), ...(typedRegion && (!matches.length || fitLevel) ? { unmatched: typedRegion } : {}), ...(matches.length && fitLevel ? { regionAs: shownAs(levels[fitLevel]) } : {}) };
+  const out: Place = { lat: r.latitude ?? 0, lon: r.longitude ?? 0, name: label, query: label, ...(r.country_code ? { country: String(r.country_code) } : {}), ...(r.population ? { population: Number(r.population) } : {}), ...(flag ? { unmatched: flag } : {}), ...(matches.length && fitLevel && !setAside.length ? { regionAs: shownAs(levels[fitLevel]) } : {}) };
   await kvPut(cache, budget, key, out, 60 * 60 * 24 * 30);
   return out;
 }
