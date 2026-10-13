@@ -11,7 +11,7 @@
 import { Qloo, QlooError, normalizeName, type Entity, type HeatPoint, type Locality, type QlooEnv, type Signals, type Tag, type Where } from "./qloo.ts";
 import { forSearch, nameKey as typedName, rankNames, resembles, together, withoutNote } from "./names.ts";
 export { resembles };
-import { cityCenter, km } from "./city.ts";
+import { cityCenter, cityRadiusKm, km } from "./city.ts";
 import { cellKey, namesFor } from "./geo.ts";
 import { AppError, type Budget } from "./limits.ts";
 
@@ -583,10 +583,6 @@ export async function matchNeighborhoods(
     computedAt: Date.now(),
   };
 }
-
-// How far a circle around a city's centre reaches to cover the city: a disc holding its people at about 3,000 per km²,
-// from 3 to 25 km (Booker's rule; Napa 3 km, Perth and Moscow 25). Unknown population: 3 km.
-const cityRadiusKm = (population?: number) => Math.min(25, Math.max(3, Math.round(Math.sqrt((population ?? 0) / 3000 / Math.PI))));
 
 // A place name for comparing cities: accents and case don't count, nor "St" for "Saint" (live: Open-Meteo's "St
 // Petersburg" is "Saint Petersburg" to Qloo).

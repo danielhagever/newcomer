@@ -1,5 +1,6 @@
 // Where a city is (Open-Meteo geocoding), so Qloo is asked about the right one ("Portland, Maine", not Portland,
-// Oregon), and how far apart two points are. Byte-identical in Newcomer and Booker: change one, copy it to the other.
+// Oregon), how far apart two points are, and how far a city reaches. Byte-identical in Newcomer and Booker: change one,
+// copy it to the other.
 // Caching is best effort: the free plan allows 1,000 KV writes a day, and a failed write must never fail a search.
 
 import { AppError, Budget, UA, fetchWithTimeout } from "./limits.ts";
@@ -409,6 +410,10 @@ async function byId(budget: Budget, id: number): Promise<any[]> {
     return [];
   }
 }
+
+// How far a circle around a city's centre reaches to cover the city: a disc holding its people at about 3,000 per
+// km², from 3 to 25 km (Yonkers 5 km, Honolulu 6, Kyoto 12, Moscow 25). Unknown population: 3 km.
+export const cityRadiusKm = (population?: number) => Math.min(25, Math.max(3, Math.round(Math.sqrt((population ?? 0) / 3000 / Math.PI))));
 
 export function km(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
   const r = (d: number) => (d * Math.PI) / 180;
