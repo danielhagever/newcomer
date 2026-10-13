@@ -1,7 +1,9 @@
-// City lookup against 457 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 516 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
-// Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL"
+// Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
+// "Windsor, Berkshire" (filed under Windsor and Maidenhead: Windsor, Ontario, flagged), "Derry, Ireland" (filed as
+// Londonderry), "Lorenskog" (no Lørenskog at all)
 // (Oahu, Kauai, Big Island and "Newcastle, UK/England" are now aliases in geo.ts); and the ambiguous bare names
 // Newcastle, Victoria, Hong Kong, St Andrews, St Malo / Saint Malo (Manitoba, or a French village: Open-Meteo
 // gives Saint-Malo itself no population), Prince Edward Island. Run: npm test
@@ -17,7 +19,7 @@ const FIX: Record<string, unknown[]> = Object.fromEntries(
 );
 const CASES: [string, string, string | null][] = JSON.parse(readFileSync(new URL("./geo-cases.json", import.meta.url), "utf8"));
 
-test("city lookup: 457 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 516 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -43,7 +45,7 @@ test("city lookup: 457 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 457);
+  assert.equal(CASES.length, 516);
   assert.deepEqual(wrong, []);
 });
 
@@ -83,6 +85,62 @@ test("100 places are asked for only when what follows the comma fits none of the
     counts.length = 0;
     await cityCenter(memoryKV().kv, new Budget(48), "Testville, Ohio");
     assert.deepEqual(counts, ["10"], "a region that fits is asked once");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("a place of exactly the typed name that fits beats another name that fits, unless that one is over 10 times bigger", async () => {
+  // Live: Open-Meteo's first 10 for "Hartford" hold Oak Harbor, Ohio (some old name of it); Hartford, Ohio is further down.
+  // An old name keeps its city: "Saigon" finds Ho Chi Minh City, not a hamlet of that name.
+  const R = (name: string, population: number, latitude: number) => ({ name, admin1: "Ohio", country: "United States", country_code: "US", population, feature_code: "PPL", latitude, longitude: -82 });
+  const answers: Record<string, any[]> = { "Testford|10": [R("Oak Harbor", 2715, 41.5)], "Testford|100": [R("Oak Harbor", 2715, 41.5), R("Testford", 384, 41.2)], "Oldname|10": [R("Bigcity", 500000, 39)], "Oldname|100": [R("Bigcity", 500000, 39), R("Oldname", 300, 40)] };
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    return new Response(JSON.stringify({ results: answers[`${u.searchParams.get("name")}|${u.searchParams.get("count")}`] ?? [] }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Testford, Ohio"))?.lat, 41.2);
+    assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Oldname, Ohio"))?.lat, 39);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("a Norwegian or Danish name typed without ø or æ is asked again with them; an answer of another name counts only with people", async () => {
+  const R = (name: string, population?: number) => ({ name, admin1: "Troms", country: "Norway", country_code: "NO", ...(population ? { population } : {}), feature_code: "PPL", latitude: 69, longitude: 19 });
+  const answers: Record<string, any[]> = { "Testsø": [R("Testsø Kommune", 5000)], "Testbø": [R("Testbø Airport")] };
+  const original = globalThis.fetch;
+  const asked: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    asked.push(u.searchParams.get("name")!);
+    return new Response(JSON.stringify({ results: answers[u.searchParams.get("name")!] ?? [] }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Testso, Norway"))?.name, "Testsø Kommune, Norway");
+    assert.equal(await cityCenter(memoryKV().kv, new Budget(48), "Testbo, Norway"), null, "an airport isn't the town");
+    asked.length = 0;
+    await cityCenter(memoryKV().kv, new Budget(48), "Testbo, Ohio");
+    assert.ok(!asked.includes("Testbø"), "only with no country or a Nordic one");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("a county fits only outside the US and only for a word that isn't a state or country", async () => {
+  // Open-Meteo writes US counties bare: Southampton, Massachusetts is in "Hampshire" (live). And a typed state is the
+  // state, even where a place elsewhere has a county of that name.
+  const R = (name: string, admin1: string, admin2: string, country_code: string, population: number, latitude: number) => ({ name, admin1, admin2, country_code, population, feature_code: "PPL", latitude, longitude: 0 });
+  const TEN = [R("Testburg", "England", "Testburg", "GB", 250000, 51), R("Testburg", "Massachusetts", "Hampshire", "US", 5000, 42), R("Testburg", "Ontario", "Ohio", "CA", 90000, 43), R("Testburg", "Ohio", "Lake", "US", 1000, 41)];
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ results: TEN }), { headers: { "content-type": "application/json" } })) as typeof fetch;
+  try {
+    const hants = await cityCenter(memoryKV().kv, new Budget(48), "Testburg, Hampshire");
+    assert.equal(hants?.lat, 51, "not the US town in Hampshire County: the biggest Testburg, flagged");
+    assert.equal(hants?.unmatched, "Hampshire");
+    assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Testburg, Ohio"))?.lat, 41, "Ohio the state, not a county named Ohio");
   } finally {
     globalThis.fetch = original;
   }
