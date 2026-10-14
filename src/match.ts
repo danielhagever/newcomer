@@ -279,6 +279,8 @@ export async function matchNeighborhoods(
   trace.push({ step: "Locate", detail: `${center.name} (${center.lat.toFixed(3)}, ${center.lon.toFixed(3)}) via Open-Meteo geocoding` });
   const note = readNote(city, center); // as Booker says it (pass 50: Newcomer never said how a city was read)
   if (note) trace.push({ step: "Check", detail: note });
+  // An answer that ends at the city still says how it was read (pass 57: "Wien, 1010" ended "no places in Winów, Poland").
+  const failAt = (message: string, status: number) => new AppError(note ? `${message} ${note}` : message, status);
 
   // 1. Each interest becomes a Qloo entity or tag. Same names are looked up once.
   const seen = new Set<string>();
@@ -366,14 +368,14 @@ export async function matchNeighborhoods(
       if (part || offBy > 50) around = circle;
       heat = await q.heatmap(mapSignals, circle);
       if (heat.points.length && medianKm(heat.points, center) > 50)
-        throw new AppError(`Qloo's map didn't line up with ${center.name}, so no neighborhoods are shown. Try the city with its state or country.`, 502);
+        throw failAt(`Qloo's map didn't line up with ${center.name}, so no neighborhoods are shown. Try the city with its state or country.`, 502);
     }
     qlooCity = heat.locality?.name;
     trace.push({ step: "Heatmap", detail: `Qloo scored ${heat.points.length} map ${heat.points.length === 1 ? "cell" : "cells"}${qlooCity ? ` in ${qlooCity}` : ""} for this taste profile` });
     // Say what the map was asked with, so the person or agent knows what to change (live: "le tigre" and "LA punk" were
     // music genres with no map there).
     const used = resolved.filter((r) => r.use.includes("map")).map((r) => (normalizeName(r.as) === normalizeName(r.input) ? r.as : `${r.input} (as ${r.as})`));
-    if (!heat.points.length && !filterTags.length) throw new AppError(`Qloo has no taste map for ${center.name} with ${used.join(", ") || "these interests"}. Try an artist, show or film Qloo knows well.`, 404);
+    if (!heat.points.length && !filterTags.length) throw failAt(`Qloo has no taste map for ${center.name} with ${used.join(", ") || "these interests"}. Try an artist, show or film Qloo knows well.`, 404);
     if (!heat.points.length) mode = "places"; // no map for these signals, but the place tastes can still rank neighborhoods
   }
   if (mode === "map") {
@@ -413,7 +415,7 @@ export async function matchNeighborhoods(
     trace.push({
       step: "Areas",
       detail:
-        `Grouped the cells into areas of about ${areaKm(heat.points)} km and kept ${hoods.length < candidates.length ? "the 7 with the highest mean affinity" : `all ${hoods.length}`}` +
+        `Grouped the cells into areas of about ${areaKm(heat.points)} km and kept ${hoods.length < candidates.length ? "the 7 with the highest mean affinity" : hoods.length === 1 ? "the only one" : `all ${hoods.length}`}` +
         (cityMatches.length ? `, plus 0.03 for each of your kinds of places within ${reach.toFixed(1)} km, up to three (Qloo found ${cityMatches.length} in the city)` : ""),
     });
 
@@ -454,9 +456,9 @@ export async function matchNeighborhoods(
       found = await q.places(placeSignals, around, 50, filterTags);
     }
     // Qloo can know a taste and have no places for it in the city (live: "oysters" in Boston): say so, not "try again".
-    if (!found.length) throw new AppError(`Qloo has no places in ${center.name} for ${resolved.filter((r) => r.placeTag).map((r) => r.as).join(", ") || "these tastes"}. Try a nearby city or another taste.`, 404);
+    if (!found.length) throw failAt(`Qloo has no places in ${center.name} for ${resolved.filter((r) => r.placeTag).map((r) => r.as).join(", ") || "these tastes"}. Try a nearby city or another taste.`, 404);
     hoods = rankByPlaces(found.filter(visitable), center); // closed or unvisitable places don't make an area
-    if (!hoods.length) throw new AppError(`Qloo's places in ${center.name} for ${resolved.filter((r) => r.placeTag).map((r) => r.as).join(", ") || "these tastes"} are closed, can't be visited or are too far out. Try another taste.`, 404);
+    if (!hoods.length) throw failAt(`Qloo's places in ${center.name} for ${resolved.filter((r) => r.placeTag).map((r) => r.as).join(", ") || "these tastes"} are closed, can't be visited or are too far out. Try another taste.`, 404);
     trace.push({ step: "Areas", detail: `Qloo found ${found.length} ${found.length === 1 ? "place that matches" : "places that match"} ${yours}; grouped them by Qloo neighborhood` });
   }
 
@@ -519,9 +521,9 @@ export async function matchNeighborhoods(
     trace.push({ step: "Filter", detail: `Left out ${across.length} area${across.length === 1 ? "" : "s"} across the border (in another country: ${where})` });
     // Judged by their places only, as OpenStreetMap couldn't be asked: asking again may show them (pass 53: Kreuzlingen's).
     if (!hoods.length && across.some(unasked))
-      throw new AppError(`Most places Qloo files around the areas it ranks highest for ${center.name} are across the border (in another country: ${where}), and OpenStreetMap couldn't be asked this time where the areas themselves are. Please try again later, or with fewer tastes.`, 502);
+      throw failAt(`Most places Qloo files around the areas it ranks highest for ${center.name} are across the border (in another country: ${where}), and OpenStreetMap couldn't be asked this time where the areas themselves are. Please try again later, or with fewer tastes.`, 502);
     // Not "try again later": every area Qloo ranks is another country's, which asking again won't change.
-    if (!hoods.length) throw new AppError(`The ${across.length === 1 ? "area" : "areas"} Qloo ranks highest around ${center.name} for these tastes ${across.length === 1 ? "is" : "are all"} across the border (in another country: ${where}), so none is shown as the city's. Try a nearby city or other tastes.`, 404);
+    if (!hoods.length) throw failAt(`The ${across.length === 1 ? "area" : "areas"} Qloo ranks highest around ${center.name} for these tastes ${across.length === 1 ? "is" : "are all"} across the border (in another country: ${where}), so none is shown as the city's. Try a nearby city or other tastes.`, 404);
   }
   // Places abroad within reach of an area that stays are left out of it, and said for the areas shown (pass 53:
   // Beausoleil's Monaco places went unsaid).
@@ -566,7 +568,7 @@ export async function matchNeighborhoods(
   }
   const named = hoods.filter((h) => h.name);
   hoods = mergeByName(named, mode).slice(0, 5);
-  if (!hoods.length) throw new AppError(`Qloo scored ${center.name}, but none of the top areas could be named. Please try again later.`, 502);
+  if (!hoods.length) throw failAt(`Qloo scored ${center.name}, but none of the top areas could be named. Please try again later.`, 502);
   // What is said is said of the areas shown (pass 55: "OpenStreetMap for 7" with 5 shown).
   const shownHere = named.filter((h) => hoods.some((s) => articleless(s.name) === articleless(h.name)));
   const leftOut = new Set(shownHere.flatMap((h) => abroadNear.get(h) ?? []));

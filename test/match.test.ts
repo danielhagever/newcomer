@@ -680,6 +680,32 @@ test("OpenStreetMap's double values, merged names and a small map are said as th
   }
 });
 
+test("an answer ending at a misread city says how it was read; every OpenStreetMap field is cut at \";\"; one area is \"the only one\" (pass 57)", async () => {
+  const search = () => matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+  // "Austin, Texas" read as San Juan, Puerto Rico (flagged), where Qloo has no map: the 404 carries the note.
+  const sanJuan = { ...AUSTIN, name: "San Juan", admin1: "San Juan", country: undefined, country_code: "PR" };
+  let m = mockFetch((c) => (c.host === "geocoding-api.open-meteo.com" ? { body: { results: [sanJuan] } } : standardQloo({ heat: () => ({ success: true, results: { heatmap: [] } }) })(c)));
+  try {
+    await assert.rejects(search(), (e: AppError) => e.status === 404 && e.message.endsWith(' "Austin, Texas" was read as San Juan, Puerto Rico; "Texas" didn\'t match its state or country, so check this is the city you meant.'));
+  } finally {
+    m.restore();
+  }
+  // A district holding two values, and a map of one area.
+  m = mockFetch((c) => {
+    if (c.host === "photon.komoot.io") return { body: { features: [{ properties: { district: "Old Town;Altstadt" } }] } };
+    if (!isPlaces(c) || c.params.get("filter.tags")) return standardQloo({ heat: () => heatmap(AUSTIN.latitude, AUSTIN.longitude, 1, 4) })(c);
+    const p = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+    return { body: { results: { entities: [place(`one${p[2]}`, "Unnamed Spot", null, +p[2], +p[1], ["Bar"], ["Evening"])] } } };
+  });
+  try {
+    const r = await search();
+    assert.deepEqual(r.neighborhoods.map((h) => h.name), ["Old Town"]);
+    assert.ok(r.trace.some((t) => t.detail === "Grouped the cells into areas of about 1 km and kept the only one"), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
+  }
+});
+
 test("Qloo's locality is named by its own name first: Montreal's is \"Island of Montreal\", disambiguated just \"Canada\" (live)", async () => {
   const m = mockFetch(standardQloo({ heat: () => ({ ...heatmap(AUSTIN.latitude, AUSTIN.longitude), query: { localities: { filter: [{ name: "Island of Montreal", disambiguation: "Canada", location: { lat: AUSTIN.latitude, lon: AUSTIN.longitude } }] } } }) }));
   try {

@@ -91,6 +91,19 @@ export async function kvPut(cache: KVNamespace, budget: Budget, key: string, val
   }
 }
 
+// Old names Open-Meteo files elsewhere or not at all, as measured (pass 55: "Madras, India" was Madras, Oregon, "Peking,
+// China" Indonesia, "Saigon" alone Saigon, Chad; pass 56: "Calicut, India" a village 1,850 km off, "Mysore, India" a toll
+// gate): the old name, the city, its country and code, and whether the name alone is the city, which it is unless a town of
+// that name elsewhere has people in Open-Meteo's data (measured 2026-10-14: Calcutta in South Africa and Ohio, Madras in
+// Oregon, Canton in Michigan and Ohio; the Leningrads, Allahabads, Cochin, Danzig, Peking and Saigon elsewhere have none).
+// Other old names are a known limit (test/geo.test.ts).
+const OLD_NAMES: [string, string, string, string, boolean][] = [
+  ["calcutta", "Kolkata", "India", "in", false], ["madras", "Chennai", "India", "in", false], ["canton", "Guangzhou", "China", "cn", false],
+  ["peking", "Beijing", "China", "cn", true], ["saigon", "Ho Chi Minh City", "Vietnam", "vn", true], ["calicut", "Kozhikode", "India", "in", true],
+  ["allahabad", "Prayagraj", "India", "in", true], ["mysore", "Mysuru", "India", "in", true], ["cochin", "Kochi", "India", "in", true],
+  ["trivandrum", "Thiruvananthapuram", "India", "in", true], ["pondicherry", "Puducherry", "India", "in", true],
+  ["leningrad", "Saint Petersburg", "Russia", "ru", true], ["danzig", "Gdańsk", "Poland", "pl", true], ["rangoon", "Yangon", "Myanmar", "mm", true],
+];
 // "Portland, Maine", "Portland, ME" and "Portland, Oregon" must each land on the right Portland:
 // fetch several candidates and prefer the one whose state or country matches what came after the
 // comma; otherwise take the most populous.
@@ -103,15 +116,7 @@ const ALIASES: Record<string, string> = {
   la: "Los Angeles, California", sf: "San Francisco, California", philly: "Philadelphia, Pennsylvania", nola: "New Orleans, Louisiana",
   vegas: "Las Vegas, Nevada", atx: "Austin, Texas", chi: "Chicago, Illinois", kc: "Kansas City, Missouri", slc: "Salt Lake City, Utah",
   pdx: "Portland, Oregon", mpls: "Minneapolis, Minnesota", stl: "St. Louis, Missouri",
-  // Old names Open-Meteo files elsewhere or not at all, as measured (pass 55: "Madras, India" was Madras, Oregon, "Peking,
-  // China" Indonesia, "Saigon" alone Saigon, Chad; pass 56: "Calicut, India" a village 1,850 km off, "Mysore, India" a toll
-  // gate); with the country only where the name is a town elsewhere (Canton, Michigan; Madras, Oregon). Other old names
-  // are a known limit (test/geo.test.ts).
-  "calcutta, india": "Kolkata, India", "madras, india": "Chennai, India", "canton, china": "Guangzhou, China",
-  peking: "Beijing, China", saigon: "Ho Chi Minh City, Vietnam", "calicut, india": "Kozhikode, India",
-  "allahabad, india": "Prayagraj, India", "mysore, india": "Mysuru, India", "cochin, india": "Kochi, India",
-  "trivandrum, india": "Thiruvananthapuram, India", "pondicherry, india": "Puducherry, India",
-  "leningrad, russia": "Saint Petersburg, Russia", "danzig, poland": "Gdańsk, Poland", "rangoon, myanmar": "Yangon, Myanmar",
+  ...Object.fromEntries(OLD_NAMES.flatMap(([old, now, country, code, alone]) => [[`${old}, ${country.toLowerCase()}`, `${now}, ${country}`], [`${old}, ${code}`, `${now}, ${country}`], ...(alone ? [[old, `${now}, ${country}`]] : [])])),
   // Open-Meteo has no Newcastle upon Tyne under "Newcastle, UK"; islands are toured at their main town.
   ...Object.fromEntries(["uk", "gb", "england", "united kingdom", "great britain", "britain"].flatMap((r) => [`newcastle, ${r}`, `newcastle ${r}`]).map((k) => [k, "Newcastle upon Tyne, England"])),
   oahu: "Honolulu, Hawaii", kauai: "Lihue, Hawaii", "big island": "Hilo, Hawaii", // Maui is found as the island
@@ -268,7 +273,7 @@ function respellings(name: string, nordic: boolean, turkish: boolean, polish: bo
 }
 
 export async function cityCenter(cache: KVNamespace, budget: Budget, city: string): Promise<Place | null> {
-  const key = `city32:${city.toLowerCase()}`; // city32: a hyphen at a word's edge, more old names
+  const key = `city33:${city.toLowerCase()}`; // city33: old names alone and with the country's code
   const hit = await kvGet(cache, budget, key);
   if (hit) return hit as Place;
   // The typed parts, cleaned once before any step reads them: "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK";
