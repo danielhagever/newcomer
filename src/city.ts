@@ -259,21 +259,21 @@ function respellings(name: string, nordic: boolean, turkish: boolean, polish: bo
 }
 
 export async function cityCenter(cache: KVNamespace, budget: Budget, city: string): Promise<Place | null> {
-  const key = `city29:${city.toLowerCase()}`; // city29: a ZIP alone flagged, set-aside parts in the wider lookups, Polish ł
+  const key = `city30:${city.toLowerCase()}`; // city30: native names before a part set aside, the typed name preferred after one, ZIP+4
   const hit = await kvGet(cache, budget, key);
   if (hit) return hit as Place;
   // The typed parts, cleaned once before any step reads them: "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK";
   // in a region, signs other than dots, hyphens and apostrophes are spaces ("NC?", "Maine (USA)", "ME/USA"); a part with
   // no letter or digit is left out ("Venice,.", "Venice, -"); "MA USA" is two parts.
   // Quotes and accent signs are one apostrophe ("Hawai‘i", "Hawaiʻi", "Hawaiʼi", "Hawai´i"), and accents stay, even typed
-  // apart; in a region "&" is "and", a spaced dash is a gap, and so is a number (a ZIP code) in a region with letters
-  // ("Portland, ME 04101", "Springfield, Illinois, US, 62701"). A region of only numbers is kept: it fits nothing and is
-  // flagged ("Portland, 04101" isn't checked; pass 52 dropped it unflagged).
+  // apart; in a region "&" is "and", a spaced dash is a gap, and so is a number (a ZIP code, ZIP+4 too) in a region with
+  // letters ("Portland, ME 04101", "Portland, ME 04101-1234", "Springfield, Illinois, US, 62701"). A region of only numbers
+  // is kept: it fits nothing and is flagged ("Portland, 04101" isn't checked; pass 52 dropped it unflagged).
   const zipGap = /\p{L}/u.test(city.split(",").slice(1).join(","));
   const typedList = city
     .replace(/[\u2018\u2019\u02bb\u02bc\u00b4`]/g, "'")
     .split(",")
-    .map((x, i) => (i ? x.replace(/&/g, " and ").replace(zipGap ? /\s-\s|\b\d+\b/g : /\s-\s/g, " ").replace(/[^\p{L}\p{M}\p{N}\s.'-]/gu, " ") : x).replace(/\s+/g, " ").trim())
+    .map((x, i) => (i ? x.replace(/&/g, " and ").replace(zipGap ? /\s-\s|\b\d+(?:-\d+)*\b/g : /\s-\s/g, " ").replace(/[^\p{L}\p{M}\p{N}\s.'-]/gu, " ") : x).replace(/\s+/g, " ").trim())
     .filter((x) => /[\p{L}\p{N}]/u.test(x))
     .flatMap((x, i) => (i ? splitRegion(x) : [x]));
   // A nickname typed with its region, then any further parts ("Newcastle, England, UK" is Newcastle upon Tyne). A name
@@ -309,11 +309,13 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
       }
     }
   }
-  // A big city typed in its own language that Open-Meteo doesn't find by that name (only "Roma, Texas" stays Roma), with
-  // its country when none was typed ("Venezia" alone: the geocoder's first "Venice" is Dayton, Ohio).
+  // A big city typed in its own language that Open-Meteo doesn't find by that name, when no region was typed (then with
+  // its country: "Venezia" alone, as the geocoder's first "Venice" is Dayton, Ohio) or a typed part is that country; "Roma,
+  // Texas" stays Roma, and a part that isn't the country is set aside below ("Roma, Italia, Europe" was a village of 87).
   const native = NATIVE[fold(name)];
   const nativeCountry = (p: string) => !!native && (p === native[1].toLowerCase() || regionNames(p).includes(fold(native[2])));
-  if (native && regionLevels(rest.map(fold).filter(Boolean)).some((ps) => ps.every(nativeCountry))) {
+  const typedParts = rest.map(fold).filter(Boolean);
+  if (native && (!typedParts.length || regionLevels(typedParts).some((ps) => ps.some(nativeCountry)))) {
     name = native[0];
     if (!rest.length) rest = [native[2]];
   }
@@ -380,7 +382,7 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   // French saints are filed with hyphens ("Saint-Étienne", "Saint-Malo"): asked for only when no spelling found
   // a place of exactly the typed name that fits what came after the comma.
   const saint = name.match(/^(st|saint|ste|sainte)\.?\s+(.+)$/i);
-  const fitsFirst = fitsAmong(list);
+  const fitsFirst = fitsAmong(list); // the saint's lookup and the respellings below never both run (a space, or none)
   if (saint && !list.some((r) => exact(r) && fitsFirst(r))) {
     const hyphen = `${/^s(ain)?te$/i.test(saint[1]) ? "Sainte" : "Saint"}-${saint[2].trim().replace(/\s+/g, "-")}`;
     for (const r of await geocode(budget, hyphen, "en")) if (canon(r.name) === canon(hyphen) && !seen.has(idOf(r))) (seen.add(idOf(r)), list.push(r));
@@ -388,10 +390,11 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   // A one-word name typed without ø, æ, ı or ł (above) is asked again with them when no town of exactly that name fits,
   // and the text names no country or a Nordic (Turkish, Polish) one or region. Places of exactly the new spelling are kept, or else the
   // first answer when it has people (the geocoder answers "Helsingør" with its English name, Elsinore, and "Rødovre"
-  // with Rødovre Municipality; not an airport or a glacier).
+  // with Rødovre Municipality; not an airport or a glacier). With no country typed only the first two spellings are
+  // asked, the Nordic ones first: a Polish name typed alone is often missed ("Kolobrzeg"), and a region that names no
+  // such country, a continent, asks none ("Tromso, Europe" is the island): known limits, as a name alone is.
   const town = (r: any) => /^PPL/.test(String(r.feature_code ?? "PPL"));
-  const fitsYet = fitsAmong(list);
-  if (!/\s/.test(name) && !list.some((r) => exact(r) && town(r) && fitsYet(r))) {
+  if (!/\s/.test(name) && !list.some((r) => exact(r) && town(r) && fitsFirst(r))) {
     const typedIn = (set: Set<string>) => !parts.length || levels.some((ps) => ps.some((p) => set.has(p)));
     for (const n of respellings(name, typedIn(NORDIC), typedIn(TURKISH), typedIn(POLISH))) {
       const answer = await geocode(budget, n, "en");
@@ -418,29 +421,36 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
     return [];
   };
   const pop = (r: any) => r.population ?? 0;
+  // A place of exactly the typed name is taken over a place of another name unless that one is over 10 times bigger
+  // ("Saigon" finds Ho Chi Minh City).
+  const exactFirst = (xs: any[]) => {
+    const named = xs.filter(exact);
+    const biggest = Math.max(0, ...named.map(pop));
+    return named.length && !xs.some((r) => !exact(r) && pop(r) > 10 * biggest) ? named : xs;
+  };
   let matches = fits();
   // Open-Meteo lists the first 10 places of a name, and a smaller one that fits what came after the comma can be
   // further down (live: Newport, Rhode Island; Salem, Massachusetts; Jackson, Wyoming), or the first 10 can hold a
   // place of another name that fits (Oak Harbor, Ohio, for "Hartford, Ohio"). Only then are 100 asked for, keeping
-  // places of exactly the typed name that fit (asking for 100 every time made Porto Porto Alegre); one of those is
-  // taken over a place of another name unless that one is over 10 times bigger ("Saigon" finds Ho Chi Minh City).
+  // places of exactly the typed name that fit the parts any of them fits (asking for 100 every time made Porto Porto
+  // Alegre), preferred as above. The first 10's other names don't count here: "Testville Norte" fitting a typed country
+  // mustn't keep out Testville itself.
   if (parts.length && !matches.some(exact)) {
     const sameName = (await geocode(budget, name, "en", 100)).filter((r) => exact(r) && !seen.has(idOf(r)));
-    const more = sameName.filter(fitsAmong([...list, ...sameName]));
+    const more = sameName.filter(fitsAmong(sameName));
     if (more.length) (list.push(...more), (matches = fits()));
-    const named = matches.filter(exact);
-    const biggest = Math.max(0, ...named.map(pop));
-    if (named.length && !matches.some((r) => !exact(r) && pop(r) > 10 * biggest)) matches = named;
+    matches = exactFirst(matches);
   }
   // A part that fits no place found, even among 100 and in the other spellings, doesn't throw away the parts that fit
-  // ("Venice, Italy, Europe" was Dayton, Ohio): it is set aside and flagged ("Europe", "Narnia").
+  // ("Venice, Italy, Europe" was Dayton, Ohio): it is set aside and flagged ("Europe", "Narnia"); a place of the typed name
+  // is preferred as above ("Hartford, OH, North America" was Oak Harbor, Ohio).
   let setAside: number[] = [];
   if (parts.length && !matches.length) {
     const fitsSome = fitSome(list);
     for (const [i, ps] of fitsSome.some(Boolean) ? levels.entries() : []) {
       const found = fitting(ps.filter((_, j) => fitsSome[j]));
       if (!found.length) continue;
-      (matches = found), (fitLevel = i), (setAside = parts.map((_, j) => j).filter((j) => !fitsSome[j]));
+      (matches = exactFirst(found)), (fitLevel = i), (setAside = parts.map((_, j) => j).filter((j) => !fitsSome[j]));
       break;
     }
   }

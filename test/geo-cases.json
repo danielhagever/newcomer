@@ -3468,5 +3468,50 @@ null
 "Boleslawiec, Poland",
 "Bolesławiec, Poland",
 null
+],
+[
+"Roma, Italia, Europe",
+"Rome, Italy",
+"Europe"
+],
+[
+"Roma, Lazio, Italia",
+"Rome, Italy",
+null
+],
+[
+"Wien, Österreich, Europa",
+"Vienna, Austria",
+"Europa"
+],
+[
+"San Sebastian, Spain, Europe",
+"Donostia / San Sebastian, Spain",
+"Europe"
+],
+[
+"Lisboa, Portugal, Europe",
+"Lisbon, Portugal",
+"Europe"
+],
+[
+"Kiev, Ukraine, Europe",
+"Kyiv, Ukraine",
+"Europe"
+],
+[
+"Hartford, OH, North America",
+"Hartford, Ohio",
+"North America"
+],
+[
+"Portland, ME 04101-1234",
+"Portland, Maine",
+null
+],
+[
+"Portland, 04101-1234",
+"Portland, Oregon",
+"04101-1234"
 ]
 ]

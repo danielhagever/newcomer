@@ -531,6 +531,60 @@ test("where OpenStreetMap can't be asked about an area holding a place abroad, i
   }
 });
 
+test("areas the request's calls didn't let OpenStreetMap name are said to be unnamed this time and the answer isn't kept; places abroad are counted for the areas shown (pass 54)", async () => {
+  const filed = (p: any, country_code: string) => ({ ...p, properties: { ...p.properties, geocode: { country_code } } });
+  const at = (c: Call) => (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+  const search = (budget = new Budget(48)) => matchNeighborhoods(ENV(memoryKV().kv), budget, "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+  // No area has a name in Qloo; the calls run low at the first OpenStreetMap lookup (live: Laredo's 5 areas became 4,
+  // "no neighborhood name", cached for a day).
+  const budget = new Budget(48);
+  let squeezed = false;
+  let m = mockFetch((c) => {
+    if (c.host === "photon.komoot.io") {
+      if (!squeezed) (squeezed = true), (budget.max = budget.used + 5);
+      return { body: { features: [{ properties: { district: `OSM ${c.params.get("lat")} ${c.params.get("lon")}` } }] } };
+    }
+    if (!isPlaces(c) || c.params.get("filter.tags")) return standardQloo()(c);
+    const p = at(c);
+    return { body: { results: { entities: [place(`u${p[2]}`, "Unnamed Spot", null, +p[2], +p[1], ["Bar"], ["Evening"])] } } };
+  });
+  try {
+    const r = await search(budget);
+    assert.equal(r.neighborhoods.length, 4, "the 4 asked are named");
+    assert.equal(r.degraded, true);
+    assert.ok(r.trace.some((t) => t.detail === "3 areas couldn't be named this time (OpenStreetMap didn't answer, or the search ran out of lookups) and were left out"), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(!r.trace.some((t) => /had no neighborhood name/.test(t.detail)));
+  } finally {
+    m.restore();
+  }
+  // Seven areas each hold one place abroad among three; five are shown, and five places abroad are said.
+  m = mockFetch((c) => {
+    if (c.host === "photon.komoot.io") return { body: { features: [{ properties: { district: "OSM Place", countrycode: "US" } }] } };
+    if (!isPlaces(c) || c.params.get("filter.tags")) return standardQloo()(c);
+    const p = at(c);
+    return { body: { results: { entities: ["MX", "US", "US"].map((cc, i) => filed(place(`s${i}${p[2]}${p[1]}`, `Spot ${i}`, `Area ${p[2]} ${p[1]}`, +p[2], +p[1], ["Bar"], ["Evening"]), cc)) } } };
+  });
+  try {
+    const r = await search();
+    assert.equal(r.neighborhoods.length, 5);
+    assert.ok(r.trace.some((t) => t.detail === "Left out 5 places across the border from the areas shown"), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
+  }
+  // OpenStreetMap answering with nothing at all is an answer: every area judged abroad by its places is final (404).
+  m = mockFetch((c) => {
+    if (c.host === "photon.komoot.io") return { body: { features: [] } };
+    if (!isPlaces(c) || c.params.get("filter.tags")) return standardQloo()(c);
+    const p = at(c);
+    return { body: { results: { entities: ["MX", "MX", "US"].map((cc, i) => filed(place(`e${i}${p[2]}`, `Spot ${i}`, "Somewhere", +p[2], +p[1], ["Bar"], ["Evening"]), cc)) } } };
+  });
+  try {
+    await assert.rejects(search(), (e: AppError) => e.status === 404 && /are all across the border/.test(e.message));
+  } finally {
+    m.restore();
+  }
+});
+
 test("Qloo's locality is named by its own name first: Montreal's is \"Island of Montreal\", disambiguated just \"Canada\" (live)", async () => {
   const m = mockFetch(standardQloo({ heat: () => ({ ...heatmap(AUSTIN.latitude, AUSTIN.longitude), query: { localities: { filter: [{ name: "Island of Montreal", disambiguation: "Canada", location: { lat: AUSTIN.latitude, lon: AUSTIN.longitude } }] } } }) }));
   try {

@@ -1,4 +1,4 @@
-// City lookup against 694 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 703 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
@@ -17,7 +17,11 @@
 // Sahara and Palestine: a village of the name fits the typed country), a city, state and country with no commas
 // ("Salem MA USA"), and a region with a direction or county before its country with no comma ("Vernon, Okanagan
 // Canada")
-// (Oahu, Kauai, Big Island and "Newcastle, UK/England" are now aliases in city.ts); and the ambiguous bare names
+// (Oahu, Kauai, Big Island and "Newcastle, UK/England" are now aliases in city.ts); a nickname followed only by a
+// continent or a ZIP code ("Venice, Europe" is Dayton, Ohio, "St Pete, 33701" Saint Petersburg, Russia, both flagged), a
+// name needing ø, ı or ł followed only by a continent ("Tromso, Europe" is the island, flagged), and a Polish name typed
+// alone (with no country only two spellings are asked, the Nordic first: "Kolobrzeg" isn't found, "Glogow" is a
+// Bulgarian village); and the ambiguous bare names
 // Newcastle, Victoria, Hong Kong, St Andrews, St Malo / Saint Malo (Manitoba, or a French village: Open-Meteo
 // gives Saint-Malo itself no population), Prince Edward Island. Run: npm test
 import { test } from "node:test";
@@ -39,7 +43,7 @@ const NOTES: Record<string, string> = {
   "Venice, Italy, Europe": `"Venice, Italy, Europe" was read as Venice, Italy; "Europe" didn't match its state or country, so check this is the city you meant.`,
 };
 
-test("city lookup: 694 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 703 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -66,7 +70,7 @@ test("city lookup: 694 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 694);
+  assert.equal(CASES.length, 703);
   assert.deepEqual(wrong, []);
 });
 
@@ -110,6 +114,32 @@ test("100 places are asked for only when what follows the comma fits none of the
     counts.length = 0;
     await cityCenter(memoryKV().kv, new Budget(48), "Testville, Ohio");
     assert.deepEqual(counts, ["10"], "a region that fits is asked once");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("a part fitting a place found so far counts for another spelling; among 100, only the places of the typed name count", async () => {
+  const R = (name: string, admin1: string, country: string, country_code: string, population: number, latitude: number, feature_code = "PPL") => ({ name, admin1, country, country_code, population, feature_code, latitude, longitude: 10 });
+  const answers: Record<string, any[]> = {
+    // The first answer's island fits Troms and Norway, so a spelling found in Vestland doesn't fit and the next is asked.
+    "Tostso|10": [R("Tostsoya", "Troms", "Norway", "NO", 0, 69, "ISL")],
+    "Tostsø|10": [R("Tostsø", "Vestland", "Norway", "NO", 5000, 60)],
+    "Tøstso|10": [R("Tøstso", "Troms", "Norway", "NO", 3000, 69.5)],
+    // Testville itself, in Mexico, isn't kept out by a place of another name in the first 10 that fits Texas.
+    "Testville|10": [R("Testville Junction", "Texas", "United States", "US", 2000, 31), R("Testville Norte", "Chihuahua", "Mexico", "MX", 3000, 28)],
+    "Testville|100": [R("Testville Junction", "Texas", "United States", "US", 2000, 31), R("Testville Norte", "Chihuahua", "Mexico", "MX", 3000, 28), R("Testville", "Nuevo León", "Mexico", "MX", 500000, 25)],
+  };
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: any) => {
+    const u = new URL(typeof input === "string" ? input : input.url);
+    return new Response(JSON.stringify({ results: answers[`${u.searchParams.get("name")}|${u.searchParams.get("count")}`] ?? [] }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    assert.equal((await cityCenter(memoryKV().kv, new Budget(48), "Tostso, Troms, Norway"))?.lat, 69.5);
+    const t = await cityCenter(memoryKV().kv, new Budget(48), "Testville, Texas, Mexico");
+    assert.equal(t?.lat, 25);
+    assert.equal(t?.unmatched, "Texas, Mexico");
   } finally {
     globalThis.fetch = original;
   }

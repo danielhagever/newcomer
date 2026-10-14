@@ -523,11 +523,10 @@ export async function matchNeighborhoods(
     // Not "try again later": every area Qloo ranks is another country's, which asking again won't change.
     if (!hoods.length) throw new AppError(`The ${across.length === 1 ? "area" : "areas"} Qloo ranks highest around ${center.name} for these tastes ${across.length === 1 ? "is" : "are all"} across the border (in another country: ${where}), so none is shown as the city's. Try a nearby city or other tastes.`, 404);
   }
-  // Places abroad within reach of an area that stays are left out of it, and said (pass 53: Beausoleil's Monaco places went
-  // unsaid).
-  const leftOut = new Set(hoods.flatMap((h) => [...h.evidence, ...h.matches].filter((e) => !home(e)).map((e) => e.id)));
+  // Places abroad within reach of an area that stays are left out of it, and said for the areas shown (pass 53:
+  // Beausoleil's Monaco places went unsaid).
+  const abroadNear = new Map(hoods.map((h) => [h, [...h.evidence, ...h.matches].filter((e) => !home(e)).map((e) => e.id)]));
   for (const h of hoods) (h.evidence = h.evidence.filter(home)), (h.matches = h.matches.filter(home));
-  if (leftOut.size) trace.push({ step: "Filter", detail: `Left out ${leftOut.size} place${leftOut.size === 1 ? "" : "s"} across the border from the areas shown` });
   // Where Qloo files most places inside an area under the city's own name and the area is at the city's centre, it is
   // the city centre (live: Melbourne's suburb "Melbourne" is its CBD; dropping that name let Fitzroy name it).
   const cityName = center.name.split(",")[0].trim();
@@ -549,18 +548,26 @@ export async function matchNeighborhoods(
     // The areas asked about their country above already have OpenStreetMap's names (and the names cache isn't read again
     // when no other area needs them).
     const ask = unnamed.filter((h) => !osm?.names.has(cellKey(h.lat, h.lon)));
-    const r = ask.length ? await namesFor(env.CACHE, budget, center.name, ask, 3) : { names: new Map<string, string[]>(), failed: 0 };
+    const r = ask.length ? await namesFor(env.CACHE, budget, center.name, ask, 3) : { names: new Map<string, string[]>(), unanswered: new Set<string>() };
     for (const h of unnamed) {
       const osmName = (osm?.names.get(cellKey(h.lat, h.lon)) ?? r.names.get(cellKey(h.lat, h.lon)) ?? []).find(says);
       h.name = osmName ? clean(osmName) : byPlaces([...h.evidence, ...h.matches]);
     }
-    // A lookup Photon didn't answer may name the area next time: the answer isn't cached.
-    if (r.failed) degraded = true;
-    const missing = unnamed.filter((h) => !h.name).length;
+    // An area Photon didn't answer for, or that the request's calls didn't reach, may be named next time: the answer isn't
+    // cached, and the area isn't said to have no name (pass 54: Laredo lost areas to "no neighborhood name", for a day).
+    const notAsked = (h: Neighborhood) => r.unanswered.has(cellKey(h.lat, h.lon));
+    if (ask.some(notAsked)) degraded = true;
+    const unknown = unnamed.filter((h) => !h.name && notAsked(h)).length;
+    const missing = unnamed.filter((h) => !h.name).length - unknown;
     if (missing) trace.push({ step: "Name", detail: `${missing} area${missing === 1 ? "" : "s"} had no neighborhood name in Qloo or OpenStreetMap and ${missing === 1 ? "was" : "were"} left out` });
+    if (unknown) trace.push({ step: "Name", detail: `${unknown} area${unknown === 1 ? "" : "s"} couldn't be named this time (OpenStreetMap didn't answer, or the search ran out of lookups) and ${unknown === 1 ? "was" : "were"} left out` });
   }
-  hoods = mergeByName(hoods.filter((h) => h.name), mode).slice(0, 5);
+  const named = hoods.filter((h) => h.name);
+  hoods = mergeByName(named, mode).slice(0, 5);
   if (!hoods.length) throw new AppError(`Qloo scored ${center.name}, but none of the top areas could be named. Please try again later.`, 502);
+  const shown = new Set(hoods.map((h) => articleless(h.name)));
+  const leftOut = new Set(named.filter((h) => shown.has(articleless(h.name))).flatMap((h) => abroadNear.get(h) ?? []));
+  if (leftOut.size) trace.push({ step: "Filter", detail: `Left out ${leftOut.size} place${leftOut.size === 1 ? "" : "s"} across the border from the areas shown` });
   trace.push({ step: "Name", detail: `Named the areas from Qloo's place data (the neighborhood of the places inside each area)${unnamed.length ? `; OpenStreetMap for ${unnamed.length} without one` : ""}` });
 
   // 5. Your kinds of places (found before the ranking) go under the neighborhood within reach. Qloo's
