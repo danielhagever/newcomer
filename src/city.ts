@@ -37,6 +37,7 @@ const OTHER_REGIONS: Record<string, string[]> = {
   nu: ["Nunavut"], nt: ["Northwest Territories", "Northern Territory"], nsw: ["New South Wales"], vic: ["Victoria"],
   qld: ["Queensland"], wa: ["Western Australia"], sa: ["South Australia"], tas: ["Tasmania"], act: ["Australian Capital Territory"],
   nyc: ["New York"], // "Brooklyn, NYC"
+  pr: ["Puerto Rico"], gu: ["Guam"], vi: ["U.S. Virgin Islands"], // written like a state's ("San Juan PR" was in Mexico)
 };
 // The UK's nations are regions (admin1), not the whole UK: "Bangor, Wales" isn't Bangor in Northern Ireland.
 const COUNTRY_WORDS: Record<string, string> = { usa: "us", "united states": "us", "united states of america": "us", us: "us", uk: "gb", "united kingdom": "gb", czech: "cz", "czech republic": "cz" };
@@ -179,13 +180,13 @@ const regionNames = (part: string) =>
 // only add words no city name ends with.)
 const RUNTIME_COUNTRIES = (() => {
   try {
-    const dn = new Intl.DisplayNames(["en"], { type: "region" });
+    const dn = new Intl.DisplayNames(["en"], { type: "region", fallback: "none" }); // a code that names nothing: undefined
     const out: string[] = [];
     for (let a = 65; a <= 90; a++)
       for (let b = 65; b <= 90; b++) {
         const code = String.fromCharCode(a, b);
         const n = dn.of(code);
-        if (n && n !== code) out.push(fold(n.replace(/\s*\(.*\)/, "").replace(/&/g, "and")));
+        if (n) out.push(fold(n.replace(/\s*\(.*\)/, "").replace(/&/g, "and")));
       }
     return out;
   } catch {
@@ -195,6 +196,10 @@ const RUNTIME_COUNTRIES = (() => {
 // Countries (and the UK's nations) as typed, folded.
 const COUNTRIES = new Set([
   ...RUNTIME_COUNTRIES,
+  // The territories' own names, which the runtimes write differently (pass 59: Node's "Hong Kong SAR China" and
+  // "Palestinian Territories", Cloudflare's "Hong Kong" and "Palestine"), so "Kowloon Hong Kong" reads the same on both.
+  ...Object.values(TERRITORY).map(([n]) => fold(n)),
+  "macao",
   ...Object.keys(COUNTRY_WORDS),
   ...("canada,australia,germany,france,spain,italy,ireland,netherlands,the netherlands,japan,mexico,brazil,israel,portugal,norway," +
     "sweden,denmark,finland,iceland,austria,switzerland,belgium,luxembourg,poland,czechia,hungary,greece,turkiye,croatia,slovenia," +
@@ -294,7 +299,7 @@ function respellings(name: string, nordic: boolean, turkish: boolean, polish: bo
 }
 
 export async function cityCenter(cache: KVNamespace, budget: Budget, city: string): Promise<Place | null> {
-  const key = `city34:${city.toLowerCase()}`; // city34: every country before the comma's place, old names without a comma
+  const key = `city35:${city.toLowerCase()}`; // city35: "Mt." names kept whole, territories' codes and own names
   const hit = await kvGet(cache, budget, key);
   if (hit) return hit as Place;
   // The typed parts, cleaned once before any step reads them: "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK";
@@ -332,13 +337,14 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   let whole: any[] | undefined; // the answer for the whole name, when it was already asked for
   // The state or country may close the name, before a comma or none ("Austin TX", "Portland Maine", "Portland ME,
   // USA"), but a city's own name may end in one too ("New Britain", "Port Washington", "West New York"): the whole name
-  // is kept when Open-Meteo has a place with exactly that name.
+  // is kept when Open-Meteo has a place with exactly that name, in any spelling of Saint, Mount and Fort ("Mt. Lebanon"
+  // is Mount Lebanon: pass 59, once Lebanon was a country, it was cut to "Mt." and landed in South Carolina).
   {
     const ws = name.split(/\s+/);
     const k = [3, 2, 1].find((k) => ws.length > k && KNOWN_REGIONS.has(fold(ws.slice(-k).join(" "))));
     if (k) {
       whole = await geocode(budget, name, "en");
-      if (!whole.some((r) => fold(r.name) === fold(name))) {
+      if (!whole.some((r) => canon(r.name) === canon(name))) {
         rest = [ws.slice(-k).join(" "), ...rest];
         name = ws.slice(0, -k).join(" ");
         whole = undefined;
