@@ -116,7 +116,8 @@ const ALIASES: Record<string, string> = {
   la: "Los Angeles, California", sf: "San Francisco, California", philly: "Philadelphia, Pennsylvania", nola: "New Orleans, Louisiana",
   vegas: "Las Vegas, Nevada", atx: "Austin, Texas", chi: "Chicago, Illinois", kc: "Kansas City, Missouri", slc: "Salt Lake City, Utah",
   pdx: "Portland, Oregon", mpls: "Minneapolis, Minnesota", stl: "St. Louis, Missouri",
-  ...Object.fromEntries(OLD_NAMES.flatMap(([old, now, country, code, alone]) => [[`${old}, ${country.toLowerCase()}`, `${now}, ${country}`], [`${old}, ${code}`, `${now}, ${country}`], ...(alone ? [[old, `${now}, ${country}`]] : [])])),
+  // With or without the comma ("Calcutta India", "Calcutta IN": pass 58).
+  ...Object.fromEntries(OLD_NAMES.flatMap(([old, now, country, code, alone]) => [...[country.toLowerCase(), code].flatMap((r) => [`${old}, ${r}`, `${old} ${r}`]).map((k) => [k, `${now}, ${country}`]), ...(alone ? [[old, `${now}, ${country}`]] : [])])),
   // Open-Meteo has no Newcastle upon Tyne under "Newcastle, UK"; islands are toured at their main town.
   ...Object.fromEntries(["uk", "gb", "england", "united kingdom", "great britain", "britain"].flatMap((r) => [`newcastle, ${r}`, `newcastle ${r}`]).map((k) => [k, "Newcastle upon Tyne, England"])),
   oahu: "Honolulu, Hawaii", kauai: "Lihue, Hawaii", "big island": "Hilo, Hawaii", // Maui is found as the island
@@ -172,8 +173,28 @@ const fold = (s: unknown) => plainLetters(String(s ?? "").normalize("NFKD").repl
 // What a region word can mean: "tx" Texas, "on" Ontario, "wa" Washington or Western Australia.
 const regionNames = (part: string) =>
   [part, US_STATES[part], US_AP[part], ...(OTHER_REGIONS[part] ?? []), ENDONYMS[part]].filter(Boolean).map((x) => fold(x));
+// Every country and territory as the runtime names it in English (Intl, as countryName below), so "Moscow Russia" is
+// Moscow, Russia as "Paris France" is (pass 58: a country missing from the list below wasn't found without a comma); "&"
+// is "and", and "Myanmar (Burma)" is Myanmar. (The few codes that name no country, "European Union" or "Unknown Region",
+// only add words no city name ends with.)
+const RUNTIME_COUNTRIES = (() => {
+  try {
+    const dn = new Intl.DisplayNames(["en"], { type: "region" });
+    const out: string[] = [];
+    for (let a = 65; a <= 90; a++)
+      for (let b = 65; b <= 90; b++) {
+        const code = String.fromCharCode(a, b);
+        const n = dn.of(code);
+        if (n && n !== code) out.push(fold(n.replace(/\s*\(.*\)/, "").replace(/&/g, "and")));
+      }
+    return out;
+  } catch {
+    return [];
+  }
+})();
 // Countries (and the UK's nations) as typed, folded.
 const COUNTRIES = new Set([
+  ...RUNTIME_COUNTRIES,
   ...Object.keys(COUNTRY_WORDS),
   ...("canada,australia,germany,france,spain,italy,ireland,netherlands,the netherlands,japan,mexico,brazil,israel,portugal,norway," +
     "sweden,denmark,finland,iceland,austria,switzerland,belgium,luxembourg,poland,czechia,hungary,greece,turkiye,croatia,slovenia," +
@@ -273,7 +294,7 @@ function respellings(name: string, nordic: boolean, turkish: boolean, polish: bo
 }
 
 export async function cityCenter(cache: KVNamespace, budget: Budget, city: string): Promise<Place | null> {
-  const key = `city33:${city.toLowerCase()}`; // city33: old names alone and with the country's code
+  const key = `city34:${city.toLowerCase()}`; // city34: every country before the comma's place, old names without a comma
   const hit = await kvGet(cache, budget, key);
   if (hit) return hit as Place;
   // The typed parts, cleaned once before any step reads them: "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK";

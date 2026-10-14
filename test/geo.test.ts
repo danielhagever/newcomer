@@ -1,4 +1,4 @@
-// City lookup against 746 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 762 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
@@ -26,8 +26,9 @@
 // code (Dutch "1012 AB" reads AB as Alberta, Malta's "VLT 1117", Austria's "A-1010", flagged), a native name followed
 // only by a postal code ("Wien, 1010" is in Poland, "Lisboa, 1100-148" Mozambique, flagged: the twin of a nickname's),
 // a postal code with no comma before or after the city ("Portland ME 04101", "10115 Berlin": not found, said so), old
-// names other than those measured in OLD_NAMES ("Calcutta" alone is Calcutta, South Africa) and a namesake of an old name
-// without people typed with its state ("Danzig, ND" is Gdańsk, flagged), a name Open-Meteo knows only in plain letters
+// names other than those measured in OLD_NAMES, an old name typed with its state ("Calcutta, West Bengal", "Madras, Tamil
+// Nadu": the namesake elsewhere, flagged), a namesake of an old name without people typed with its state ("Danzig, ND" is
+// Gdańsk, flagged), a name Open-Meteo knows only in plain letters
 // ("Bielsko-Biała" isn't found; "Bielsko-Biala" is), a region in its own language that no list holds ("Düsseldorf,
 // Nordrhein-Westfalen", "Bordeaux, Nouvelle-Aquitaine": the right city, flagged); and the ambiguous bare names
 // Newcastle, Victoria, Hong Kong, St Andrews, St Malo / Saint Malo (Manitoba, or a French village: Open-Meteo
@@ -51,7 +52,7 @@ const NOTES: Record<string, string> = {
   "Venice, Italy, Europe": `"Venice, Italy, Europe" was read as Venice, Italy; "Europe" didn't match its state or country, so check this is the city you meant.`,
 };
 
-test("city lookup: 746 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 762 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -78,7 +79,7 @@ test("city lookup: 746 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 746);
+  assert.equal(CASES.length, 762);
   assert.deepEqual(wrong, []);
 });
 

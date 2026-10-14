@@ -690,6 +690,13 @@ test("an answer ending at a misread city says how it was read; every OpenStreetM
   } finally {
     m.restore();
   }
+  // The same for a search of places only ("no places in Winów, Poland" ended without it, live).
+  m = mockFetch((c) => (c.host === "geocoding-api.open-meteo.com" ? { body: { results: [sanJuan] } } : isPlaces(c) ? { body: { results: { entities: [] } } } : standardQloo()(c)));
+  try {
+    await assert.rejects(matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "ramen", kind: "tag" }]), (e: AppError) => e.status === 404 && /^Qloo has no places in San Juan, Puerto Rico for /.test(e.message) && e.message.endsWith("so check this is the city you meant."));
+  } finally {
+    m.restore();
+  }
   // A district holding two values, and a map of one area.
   m = mockFetch((c) => {
     if (c.host === "photon.komoot.io") return { body: { features: [{ properties: { district: "Old Town;Altstadt" } }] } };
