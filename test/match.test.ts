@@ -611,7 +611,7 @@ test("what the naming says is said of the areas shown, and an empty OpenStreetMa
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
     assert.ok(r.neighborhoods.length > 0);
-    assert.ok(r.trace.some((t) => t.detail === "Named the areas from Qloo's place data (the neighborhood of the places inside each area)"), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(r.trace.some((t) => t.detail === `Named the areas from Qloo's place data (the neighborhood of the places inside each area); the places within reach for ${r.neighborhoods.length} without either`), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     m.restore();
   }
@@ -710,6 +710,27 @@ test("an answer ending at a misread city says how it was read; every OpenStreetM
     assert.ok(r.trace.some((t) => t.detail === "Grouped the cells into areas of about 1 km and kept the only one"), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     m.restore();
+  }
+});
+
+test("when no area can be named, \"try again\" only if OpenStreetMap couldn't be asked (pass 60)", async () => {
+  // Qloo files every place under no neighborhood (live: Mt. Lebanon's 56 places).
+  const nameless = (c: Call) => {
+    if (!isPlaces(c) || c.params.get("filter.tags")) return standardQloo()(c);
+    const p = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+    return { body: { results: { entities: [place(`z${p[2]}${p[1]}`, "Spot", null, +p[2], +p[1], ["Bar"], ["Evening"])] } } };
+  };
+  const search = () => matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+  for (const [what, photon, status, says] of [
+    ["OpenStreetMap down", { status: 503, body: {} }, 502, /none of the top areas could be named this time \(OpenStreetMap didn't answer\)\. Please try again later\.$/],
+    ["OpenStreetMap with no names", { body: { features: [] } }, 404, /none of the top areas has a neighborhood name in Qloo or OpenStreetMap\. Try a nearby city\.$/],
+  ] as const) {
+    const m = mockFetch((c) => (c.host === "photon.komoot.io" ? (photon as any) : nameless(c)));
+    try {
+      await assert.rejects(search(), (e: AppError) => e.status === status && says.test(e.message), what);
+    } finally {
+      m.restore();
+    }
   }
 });
 

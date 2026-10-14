@@ -37,7 +37,7 @@ const OTHER_REGIONS: Record<string, string[]> = {
   nu: ["Nunavut"], nt: ["Northwest Territories", "Northern Territory"], nsw: ["New South Wales"], vic: ["Victoria"],
   qld: ["Queensland"], wa: ["Western Australia"], sa: ["South Australia"], tas: ["Tasmania"], act: ["Australian Capital Territory"],
   nyc: ["New York"], // "Brooklyn, NYC"
-  pr: ["Puerto Rico"], gu: ["Guam"], vi: ["U.S. Virgin Islands"], // written like a state's ("San Juan PR" was in Mexico)
+  pr: ["Puerto Rico"], gu: ["Guam"], vi: ["U.S. Virgin Islands"], usvi: ["U.S. Virgin Islands"], // written like a state's ("San Juan PR" was in Mexico)
 };
 // The UK's nations are regions (admin1), not the whole UK: "Bangor, Wales" isn't Bangor in Northern Ireland.
 const COUNTRY_WORDS: Record<string, string> = { usa: "us", "united states": "us", "united states of america": "us", us: "us", uk: "gb", "united kingdom": "gb", czech: "cz", "czech republic": "cz" };
@@ -151,7 +151,7 @@ const ENDONYMS: Record<string, string> = {
   brasil: "Brazil", deutschland: "Germany", espana: "Spain", italia: "Italy", osterreich: "Austria", schweiz: "Switzerland",
   suisse: "Switzerland", nederland: "Netherlands", sverige: "Sweden", norge: "Norway", danmark: "Denmark", polska: "Poland",
   eire: "Ireland", mexico: "Mexico", "great britain": "United Kingdom", britain: "United Kingdom", turkey: "Turkiye",
-  uae: "United Arab Emirates", "czech republic": "Czechia", holland: "Netherlands", korea: "South Korea",
+  uae: "United Arab Emirates", "czech republic": "Czechia", holland: "Netherlands", korea: "South Korea", macao: "Macau",
   // Spain's regions in Spanish, and in English as people spell them (Open-Meteo writes "Castille": "Toledo,
   // Castilla-La Mancha" was Toledo, Ohio; "Toledo, Castile-La Mancha" too).
   "castilla-la mancha": "Castille-La Mancha", "castilla la mancha": "Castille-La Mancha", "castile-la mancha": "Castille-La Mancha",
@@ -199,7 +199,6 @@ const COUNTRIES = new Set([
   // The territories' own names, which the runtimes write differently (pass 59: Node's "Hong Kong SAR China" and
   // "Palestinian Territories", Cloudflare's "Hong Kong" and "Palestine"), so "Kowloon Hong Kong" reads the same on both.
   ...Object.values(TERRITORY).map(([n]) => fold(n)),
-  "macao",
   ...Object.keys(COUNTRY_WORDS),
   ...("canada,australia,germany,france,spain,italy,ireland,netherlands,the netherlands,japan,mexico,brazil,israel,portugal,norway," +
     "sweden,denmark,finland,iceland,austria,switzerland,belgium,luxembourg,poland,czechia,hungary,greece,turkiye,croatia,slovenia," +
@@ -299,7 +298,7 @@ function respellings(name: string, nordic: boolean, turkish: boolean, polish: bo
 }
 
 export async function cityCenter(cache: KVNamespace, budget: Budget, city: string): Promise<Place | null> {
-  const key = `city35:${city.toLowerCase()}`; // city35: "Mt." names kept whole, territories' codes and own names
+  const key = `city36:${city.toLowerCase()}`; // city36: saints always asked hyphenated, Macao, USVI
   const hit = await kvGet(cache, budget, key);
   if (hit) return hit as Place;
   // The typed parts, cleaned once before any step reads them: "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK";
@@ -422,11 +421,11 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   };
   const typedNames = new Set([canon(name)]); // the typed name, and the respelling found for it (below)
   const exact = (r: any) => typedNames.has(canon(r.name));
-  // French saints are filed with hyphens ("Saint-Étienne", "Saint-Malo"): asked for only when no spelling found
-  // a place of exactly the typed name that fits what came after the comma.
+  // French saints are filed with hyphens ("Saint-Étienne", "Saint-Malo"), and always asked for: a spot of exactly the typed
+  // name kept it from being asked ("Saint Denis, France" was Saint-Denis-sur-Coise, 558 people, 401 km from Saint-Denis;
+  // "Saint Priest, France" a village, "St Priest, France" a peak: pass 60).
   const saint = name.match(/^(st|saint|ste|sainte)\.?\s+(.+)$/i);
-  const fitsFirst = fitsAmong(list); // the saint's lookup and the respellings below never both run (a space, or none)
-  if (saint && !list.some((r) => exact(r) && fitsFirst(r))) {
+  if (saint) {
     const hyphen = `${/^s(ain)?te$/i.test(saint[1]) ? "Sainte" : "Saint"}-${saint[2].trim().replace(/\s+/g, "-")}`;
     for (const r of await geocode(budget, hyphen, "en")) if (canon(r.name) === canon(hyphen) && !seen.has(idOf(r))) (seen.add(idOf(r)), list.push(r));
   }
@@ -437,6 +436,7 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   // asked, the Nordic ones first: a Polish name typed alone is often missed ("Kolobrzeg"), and a region that names no
   // such country, a continent, asks none ("Tromso, Europe" is the island): known limits, as a name alone is.
   const town = (r: any) => /^PPL/.test(String(r.feature_code ?? "PPL"));
+  const fitsFirst = fitsAmong(list);
   if (!/\s/.test(name) && !list.some((r) => exact(r) && town(r) && fitsFirst(r))) {
     const typedIn = (set: Set<string>) => !parts.length || levels.some((ps) => ps.some((p) => set.has(p)));
     for (const n of respellings(name, typedIn(NORDIC), typedIn(TURKISH), typedIn(POLISH))) {
