@@ -413,7 +413,7 @@ export async function matchNeighborhoods(
     trace.push({
       step: "Areas",
       detail:
-        `Grouped the cells into areas of about ${areaKm(heat.points)} km and kept the 7 with the highest mean affinity` +
+        `Grouped the cells into areas of about ${areaKm(heat.points)} km and kept ${hoods.length < candidates.length ? "the 7 with the highest mean affinity" : `all ${hoods.length}`}` +
         (cityMatches.length ? `, plus 0.03 for each of your kinds of places within ${reach.toFixed(1)} km, up to three (Qloo found ${cityMatches.length} in the city)` : ""),
     });
 

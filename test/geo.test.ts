@@ -1,4 +1,4 @@
-// City lookup against 718 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 731 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
@@ -22,8 +22,11 @@
 // name needing ø, ı or ł followed only by a continent ("Tromso, Europe" is the island, flagged), and a Polish name typed
 // alone (with no country only two spellings are asked, the Nordic first: "Kolobrzeg" isn't found, "Glogow" is a
 // Bulgarian village), "San Sebastian" with a Spanish region other than its own ("San Sebastian, Canary Islands, Spain" is
-// Donostia, flagged: a native name holds when its country is typed), Dutch postal codes ("1012 AB" reads AB as Alberta,
-// flagged); and the ambiguous bare names
+// Donostia, flagged: a native name holds when its country is typed), postal codes whose letters aren't the country's
+// code (Dutch "1012 AB" reads AB as Alberta, Malta's "VLT 1117", Austria's "A-1010", flagged), a native name followed
+// only by a postal code ("Wien, 1010" is in Poland, "Lisboa, 1100-148" Mozambique, flagged: the twin of a nickname's),
+// a postal code with no comma before or after the city ("Portland ME 04101", "10115 Berlin": not found, said so), old
+// names other than those measured in ALIASES ("Calcutta" alone is Calcutta, South Africa); and the ambiguous bare names
 // Newcastle, Victoria, Hong Kong, St Andrews, St Malo / Saint Malo (Manitoba, or a French village: Open-Meteo
 // gives Saint-Malo itself no population), Prince Edward Island. Run: npm test
 import { test } from "node:test";
@@ -45,7 +48,7 @@ const NOTES: Record<string, string> = {
   "Venice, Italy, Europe": `"Venice, Italy, Europe" was read as Venice, Italy; "Europe" didn't match its state or country, so check this is the city you meant.`,
 };
 
-test("city lookup: 718 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 731 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -72,7 +75,7 @@ test("city lookup: 718 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 718);
+  assert.equal(CASES.length, 731);
   assert.deepEqual(wrong, []);
 });
 

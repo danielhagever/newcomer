@@ -103,10 +103,15 @@ const ALIASES: Record<string, string> = {
   la: "Los Angeles, California", sf: "San Francisco, California", philly: "Philadelphia, Pennsylvania", nola: "New Orleans, Louisiana",
   vegas: "Las Vegas, Nevada", atx: "Austin, Texas", chi: "Chicago, Illinois", kc: "Kansas City, Missouri", slc: "Salt Lake City, Utah",
   pdx: "Portland, Oregon", mpls: "Minneapolis, Minnesota", stl: "St. Louis, Missouri",
-  // Old English names Open-Meteo files elsewhere (pass 55: "Madras, India" was Madras, Oregon, "Peking, China" Indonesia,
-  // "Saigon" alone Saigon, Chad); with the country only where the name is a town elsewhere (Canton, Michigan; Madras, Oregon).
+  // Old names Open-Meteo files elsewhere or not at all, as measured (pass 55: "Madras, India" was Madras, Oregon, "Peking,
+  // China" Indonesia, "Saigon" alone Saigon, Chad; pass 56: "Calicut, India" a village 1,850 km off, "Mysore, India" a toll
+  // gate); with the country only where the name is a town elsewhere (Canton, Michigan; Madras, Oregon). Other old names
+  // are a known limit (test/geo.test.ts).
   "calcutta, india": "Kolkata, India", "madras, india": "Chennai, India", "canton, china": "Guangzhou, China",
-  "peking, china": "Beijing, China", peking: "Beijing, China", "saigon, vietnam": "Ho Chi Minh City, Vietnam", saigon: "Ho Chi Minh City, Vietnam",
+  peking: "Beijing, China", saigon: "Ho Chi Minh City, Vietnam", "calicut, india": "Kozhikode, India",
+  "allahabad, india": "Prayagraj, India", "mysore, india": "Mysuru, India", "cochin, india": "Kochi, India",
+  "trivandrum, india": "Thiruvananthapuram, India", "pondicherry, india": "Puducherry, India",
+  "leningrad, russia": "Saint Petersburg, Russia", "danzig, poland": "Gdańsk, Poland", "rangoon, myanmar": "Yangon, Myanmar",
   // Open-Meteo has no Newcastle upon Tyne under "Newcastle, UK"; islands are toured at their main town.
   ...Object.fromEntries(["uk", "gb", "england", "united kingdom", "great britain", "britain"].flatMap((r) => [`newcastle, ${r}`, `newcastle ${r}`]).map((k) => [k, "Newcastle upon Tyne, England"])),
   oahu: "Honolulu, Hawaii", kauai: "Lihue, Hawaii", "big island": "Hilo, Hawaii", // Maui is found as the island
@@ -263,22 +268,23 @@ function respellings(name: string, nordic: boolean, turkish: boolean, polish: bo
 }
 
 export async function cityCenter(cache: KVNamespace, budget: Budget, city: string): Promise<Place | null> {
-  const key = `city31:${city.toLowerCase()}`; // city31: postal codes with letters, old English names
+  const key = `city32:${city.toLowerCase()}`; // city32: a hyphen at a word's edge, more old names
   const hit = await kvGet(cache, budget, key);
   if (hit) return hit as Place;
   // The typed parts, cleaned once before any step reads them: "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK";
   // in a region, signs other than dots, hyphens and apostrophes are spaces ("NC?", "Maine (USA)", "ME/USA"); a part with
   // no letter or digit is left out ("Venice,.", "Venice, -"); "MA USA" is two parts.
   // Quotes and accent signs are one apostrophe ("Hawai‘i", "Hawaiʻi", "Hawaiʼi", "Hawai´i"), and accents stay, even typed
-  // apart; in a region "&" is "and", a spaced dash is a gap, and so is a word holding a digit (a postal code: "Portland, ME
-  // 04101", "Portland, ME 04101-1234", "Springfield, Illinois, US, 62701", "London, ON N6A 1A1", which was London, England)
-  // when the region has a word without one. A region of only such words is kept: it fits nothing and is flagged
+  // apart; in a region "&" is "and", a word holding a digit is a gap (a postal code: "Portland, ME 04101", "Portland, ME
+  // 04101-1234", "Springfield, Illinois, US, 62701", "London, ON N6A 1A1", which was London, England) when the region has
+  // a word without one, and so is a hyphen not between two letters or digits ("Venice, -", " - ", what a postal code
+  // leaves: "Riga, LV-1050" is Latvia's code). A region of only such words is kept: it fits nothing and is flagged
   // ("Portland, 04101" and "Cambridge, CB2 1TN" aren't checked; pass 52 dropped the first unflagged).
   const zipGap = city.split(",").slice(1).join(",").split(/[^\p{L}\p{N}]+/u).some((w) => /\p{L}/u.test(w) && !/\d/.test(w));
   const typedList = city
     .replace(/[\u2018\u2019\u02bb\u02bc\u00b4`]/g, "'")
     .split(",")
-    .map((x, i) => (i ? x.replace(/&/g, " and ").replace(zipGap ? /\s-\s|[\p{L}\p{N}]*\d[\p{L}\p{N}]*(?:-[\p{L}\p{N}]*\d[\p{L}\p{N}]*)*/gu : /\s-\s/g, " ").replace(/[^\p{L}\p{M}\p{N}\s.'-]/gu, " ") : x).replace(/\s+/g, " ").trim())
+    .map((x, i) => (i ? x.replace(/&/g, " and ").replace(zipGap ? /[\p{L}\p{N}]*\d[\p{L}\p{N}]*/gu : /$^/, " ").replace(/(?<![\p{L}\p{N}])-+|-+(?![\p{L}\p{N}])/gu, " ").replace(/[^\p{L}\p{M}\p{N}\s.'-]/gu, " ") : x).replace(/\s+/g, " ").trim())
     .filter((x) => /[\p{L}\p{N}]/u.test(x))
     .flatMap((x, i) => (i ? splitRegion(x) : [x]));
   // A nickname typed with its region, then any further parts ("Newcastle, England, UK" is Newcastle upon Tyne). A name

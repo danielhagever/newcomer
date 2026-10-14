@@ -19,7 +19,8 @@ async function reverseName(lat: number, lon: number): Promise<{ n: string[]; c?:
     const res = await fetchWithTimeout(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&lang=en`, { headers: UA }, 5000);
     if (!res.ok) return null;
     const d: any = await res.json();
-    const p = d.features?.[0]?.properties ?? {};
+    // OpenStreetMap separates two values of a field with ";" ("Talbot Street;King Street", London, Ontario): the first.
+    const p = Object.fromEntries(Object.entries(d.features?.[0]?.properties ?? {}).map(([k, v]) => [k, typeof v === "string" ? v.split(";")[0].trim() : v])) as any;
     const street = p.street ?? (p.osm_key === "highway" ? p.name : undefined);
     const spot = p.osm_key === "place" && /^(neighbourhood|quarter|suburb)$/.test(p.osm_value) ? p.name : undefined;
     const n = [p.district, p.locality, spot, p.suburb, street ? `around ${street}` : undefined].filter((x): x is string => typeof x === "string" && !!x.trim());
@@ -40,7 +41,7 @@ export async function namesFor(
   cells: { lat: number; lon: number }[],
   reserve: number,
 ): Promise<{ names: Map<string, string[]>; countries: Map<string, string>; unanswered: Set<string> }> {
-  const key = `names4:${cityKey.toLowerCase()}`; // names4: with the cell's country (2026-10-14)
+  const key = `names5:${cityKey.toLowerCase()}`; // names5: the first of two values (names4: the cell's country, 2026-10-14)
   const known: Record<string, { n: string[]; c?: string }> = (await kvGet(cache, budget, key)) ?? {};
   const want = [...new Set(cells.map((c) => cellKey(c.lat, c.lon)))].filter((k) => !(k in known));
   const fresh: Record<string, { n: string[]; c?: string }> = {};

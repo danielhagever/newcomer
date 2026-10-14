@@ -503,7 +503,7 @@ test("where OpenStreetMap can't be asked about an area holding a place abroad, i
   // and the cache isn't read again when no other area needs a name.
   const { kv } = memoryKV({ failPuts: true });
   let namesRead = 0;
-  const counted = { ...(kv as any), get: (k: string, t?: any) => (k.startsWith("names4:") && namesRead++, (kv as any).get(k, t)) } as KVNamespace;
+  const counted = { ...(kv as any), get: (k: string, t?: any) => (k.startsWith("names") && namesRead++, (kv as any).get(k, t)) } as KVNamespace;
   let first = true;
   m = mockFetch((c) => {
     if (c.host === "photon.komoot.io") return osm("US");
@@ -622,6 +622,59 @@ test("what the naming says is said of the areas shown, and an empty OpenStreetMa
     const cells = [{ lat: 30.5, lon: -97.7 }, { lat: 31.5, lon: -97.7 }];
     for (let i = 0; i < 2; i++) await namesFor(kv, new Budget(48), "Austin, Texas", cells, 3);
     assert.deepEqual(m.calls.filter((c) => c.host === "photon.komoot.io").map((c) => c.params.get("lat")), ["30.5", "31.5", "31.5"]);
+  } finally {
+    m.restore();
+  }
+});
+
+test("OpenStreetMap's double values, merged names and a small map are said as they are (pass 56)", async () => {
+  const filed = (p: any, country_code: string) => ({ ...p, properties: { ...p.properties, geocode: { country_code } } });
+  const at = (c: Call) => (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+  const search = () => matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+  const unnamed = (c: Call) => {
+    if (!isPlaces(c) || c.params.get("filter.tags")) return standardQloo()(c);
+    const p = at(c);
+    return { body: { results: { entities: [place(`n${p[2]}${p[1]}`, "Unnamed Spot", null, +p[2], +p[1], ["Bar"], ["Evening"])] } } };
+  };
+  // OpenStreetMap separates two values with ";" (live: "around Talbot Street;King Street" in London, Ontario).
+  let m = mockFetch((c) => (c.host === "photon.komoot.io" ? { body: { features: [{ properties: { street: `Talbot Street;King Street ${c.params.get("lat")} ${c.params.get("lon")}` } }] } } : unnamed(c)));
+  try {
+    const r = await search();
+    assert.ok(r.neighborhoods.length > 0 && r.neighborhoods.every((h) => h.name === "around Talbot Street"), JSON.stringify(r.neighborhoods.map((h) => h.name)));
+  } finally {
+    m.restore();
+  }
+  // Seven areas OpenStreetMap names by their row merge into three names: "OpenStreetMap for 3", not 7.
+  m = mockFetch((c) => (c.host === "photon.komoot.io" ? { body: { features: [{ properties: { district: `Row ${c.params.get("lat")}` } }] } } : unnamed(c)));
+  try {
+    const r = await search();
+    assert.equal(r.neighborhoods.length, 3);
+    assert.ok(r.trace.some((t) => t.detail.endsWith("; OpenStreetMap for 3 without one")), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
+  }
+  // "The Glebe" (OpenStreetMap's) and "Glebe" (Qloo's) are one area shown: the places abroad of both are counted.
+  let first = true;
+  m = mockFetch((c) => {
+    if (c.host === "photon.komoot.io") return { body: { features: [{ properties: { district: "The Glebe", countrycode: "US" } }] } };
+    if (!isPlaces(c) || c.params.get("filter.tags")) return standardQloo()(c);
+    const p = at(c);
+    const mine = first;
+    first = false;
+    return { body: { results: { entities: ["MX", "US", "US"].map((cc, i) => filed(place(`g${i}${p[2]}${p[1]}`, `Spot ${i}`, mine ? null : "Glebe", +p[2], +p[1], ["Bar"], ["Evening"]), cc)) } } };
+  });
+  try {
+    const r = await search();
+    assert.deepEqual(r.neighborhoods.map((h) => h.name), ["The Glebe"]);
+    assert.ok(r.trace.some((t) => t.detail === "Left out 7 places across the border from the areas shown"), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
+  }
+  // A small map keeps all its areas, said as such (live: London, Ontario had 3 areas, "kept the 7").
+  m = mockFetch(standardQloo({ heat: () => heatmap(AUSTIN.latitude, AUSTIN.longitude, 2, 8) }));
+  try {
+    const r = await search();
+    assert.ok(r.trace.some((t) => t.detail === "Grouped the cells into areas of about 1 km and kept all 3"), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     m.restore();
   }
