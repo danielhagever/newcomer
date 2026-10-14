@@ -2196,8 +2196,8 @@ null
 ],
 [
 "Calcutta, India",
-"Calcutta, South Africa",
-"India"
+"Kolkata, India",
+null
 ],
 [
 "Ponce, Puerto Rico",
@@ -3513,5 +3513,80 @@ null
 "Portland, 04101-1234",
 "Portland, Oregon",
 "04101-1234"
+],
+[
+"London, ON N6A 1A1",
+"London, Ontario",
+null
+],
+[
+"London, Ontario N6A 1A1",
+"London, Ontario",
+null
+],
+[
+"Kingston, ON K7L 2N8",
+"Kingston, Ontario",
+null
+],
+[
+"Victoria, BC V8W 1A1",
+"Victoria, British Columbia",
+null
+],
+[
+"London, N6A 1A1",
+"London, England",
+"N6A 1A1"
+],
+[
+"Cambridge, CB2 1TN",
+"Cambridge, England",
+"CB2 1TN"
+],
+[
+"Cambridge, England CB2 1TN",
+"Cambridge, England",
+null
+],
+[
+"Madras, India",
+"Chennai, India",
+null
+],
+[
+"Madras, Oregon",
+"Madras, Oregon",
+null
+],
+[
+"Peking, China",
+"Beijing, China",
+null
+],
+[
+"Peking",
+"Beijing, China",
+null
+],
+[
+"Canton, China",
+"Guangzhou, China",
+null
+],
+[
+"Canton",
+"Canton, Michigan",
+null
+],
+[
+"Saigon",
+"Ho Chi Minh City, Vietnam",
+null
+],
+[
+"Saigon, Vietnam",
+"Ho Chi Minh City, Vietnam",
+null
 ]
 ]

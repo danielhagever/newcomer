@@ -544,6 +544,7 @@ export async function matchNeighborhoods(
   // An area Qloo grouped under the city's own name at its centre is the city centre too (places mode: Melbourne's CBD).
   for (const h of hoods) h.name = says(h.name) ? clean(h.name) : h.name && cityWords.has(cityKey(clean(h.name))) && km(h, center) <= 1.5 ? centreName : "";
   const unnamed = hoods.filter((h) => !h.name);
+  const byOsm = new Set<Neighborhood>(); // named by OpenStreetMap
   if (unnamed.length) {
     // The areas asked about their country above already have OpenStreetMap's names (and the names cache isn't read again
     // when no other area needs them).
@@ -552,6 +553,7 @@ export async function matchNeighborhoods(
     for (const h of unnamed) {
       const osmName = (osm?.names.get(cellKey(h.lat, h.lon)) ?? r.names.get(cellKey(h.lat, h.lon)) ?? []).find(says);
       h.name = osmName ? clean(osmName) : byPlaces([...h.evidence, ...h.matches]);
+      if (osmName) byOsm.add(h);
     }
     // An area Photon didn't answer for, or that the request's calls didn't reach, may be named next time: the answer isn't
     // cached, and the area isn't said to have no name (pass 54: Laredo lost areas to "no neighborhood name", for a day).
@@ -565,10 +567,12 @@ export async function matchNeighborhoods(
   const named = hoods.filter((h) => h.name);
   hoods = mergeByName(named, mode).slice(0, 5);
   if (!hoods.length) throw new AppError(`Qloo scored ${center.name}, but none of the top areas could be named. Please try again later.`, 502);
-  const shown = new Set(hoods.map((h) => articleless(h.name)));
-  const leftOut = new Set(named.filter((h) => shown.has(articleless(h.name))).flatMap((h) => abroadNear.get(h) ?? []));
+  // What is said is said of the areas shown (pass 55: "OpenStreetMap for 7" with 5 shown).
+  const shownHere = named.filter((h) => hoods.some((s) => articleless(s.name) === articleless(h.name)));
+  const leftOut = new Set(shownHere.flatMap((h) => abroadNear.get(h) ?? []));
   if (leftOut.size) trace.push({ step: "Filter", detail: `Left out ${leftOut.size} place${leftOut.size === 1 ? "" : "s"} across the border from the areas shown` });
-  trace.push({ step: "Name", detail: `Named the areas from Qloo's place data (the neighborhood of the places inside each area)${unnamed.length ? `; OpenStreetMap for ${unnamed.length} without one` : ""}` });
+  const fromOsm = new Set(shownHere.filter((h) => byOsm.has(h)).map((h) => articleless(h.name))).size;
+  trace.push({ step: "Name", detail: `Named the areas from Qloo's place data (the neighborhood of the places inside each area)${fromOsm ? `; OpenStreetMap for ${fromOsm} without one` : ""}` });
 
   // 5. Your kinds of places (found before the ranking) go under the neighborhood within reach. Qloo's
   // city filter reaches a bit past the city: a Manhattan bar must not be listed under Williamsburg.

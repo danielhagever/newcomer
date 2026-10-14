@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { matchNeighborhoods, planDay, rankAreas, resembles, samePlace } from "../src/match.ts";
 import { Qloo, signalParams } from "../src/qloo.ts";
 import { cityCenter, km } from "../src/city.ts";
+import { namesFor } from "../src/geo.ts";
 import { AppError, Budget } from "../src/limits.ts";
 import { AUSTIN, ENV, heatmap, memoryKV, mockFetch, place, places, tag, type Call } from "./mock.ts";
 
@@ -580,6 +581,47 @@ test("areas the request's calls didn't let OpenStreetMap name are said to be unn
   });
   try {
     await assert.rejects(search(), (e: AppError) => e.status === 404 && /are all across the border/.test(e.message));
+  } finally {
+    m.restore();
+  }
+});
+
+test("what the naming says is said of the areas shown, and an empty OpenStreetMap answer isn't kept (pass 55)", async () => {
+  // Seven areas without a Qloo name, each named by OpenStreetMap: five are shown, and "OpenStreetMap for 5".
+  let m = mockFetch((c) => {
+    if (c.host === "photon.komoot.io") return { body: { features: [{ properties: { district: `OSM ${c.params.get("lat")} ${c.params.get("lon")}` } }] } };
+    if (!isPlaces(c) || c.params.get("filter.tags")) return standardQloo()(c);
+    const p = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+    return { body: { results: { entities: [place(`n${p[2]}${p[1]}`, "Unnamed Spot", null, +p[2], +p[1], ["Bar"], ["Evening"])] } } };
+  });
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.equal(r.neighborhoods.length, 5);
+    assert.ok(r.trace.some((t) => t.detail.endsWith("; OpenStreetMap for 5 without one")), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
+  }
+  // An area OpenStreetMap has nothing for, named by the places within its reach, isn't counted as OpenStreetMap's.
+  m = mockFetch((c) => {
+    if (c.host === "photon.komoot.io") return { body: { features: [] } };
+    if (!isPlaces(c) || c.params.get("filter.tags")) return standardQloo()(c);
+    const p = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+    return { body: { results: { entities: [place(`i${p[2]}${p[1]}`, "Inside", null, +p[2], +p[1], ["Bar"], ["Evening"]), place(`o${p[2]}${p[1]}`, "Outside", `Near ${p[2]} ${p[1]}`, +p[2] + 0.012, +p[1], ["Bar"], ["Evening"])] } } };
+  });
+  try {
+    const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+    assert.ok(r.neighborhoods.length > 0);
+    assert.ok(r.trace.some((t) => t.detail === "Named the areas from Qloo's place data (the neighborhood of the places inside each area)"), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
+  }
+  // A spot OpenStreetMap answers with nothing is asked again next time (it may have a name then); a named one isn't.
+  m = mockFetch((c) => (c.host === "photon.komoot.io" ? { body: { features: Number(c.params.get("lat")) > 31 ? [] : [{ properties: { district: "Named" } }] } } : undefined));
+  try {
+    const { kv } = memoryKV();
+    const cells = [{ lat: 30.5, lon: -97.7 }, { lat: 31.5, lon: -97.7 }];
+    for (let i = 0; i < 2; i++) await namesFor(kv, new Budget(48), "Austin, Texas", cells, 3);
+    assert.deepEqual(m.calls.filter((c) => c.host === "photon.komoot.io").map((c) => c.params.get("lat")), ["30.5", "31.5", "31.5"]);
   } finally {
     m.restore();
   }

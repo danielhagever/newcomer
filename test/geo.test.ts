@@ -1,4 +1,4 @@
-// City lookup against 703 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 718 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
@@ -21,7 +21,9 @@
 // continent or a ZIP code ("Venice, Europe" is Dayton, Ohio, "St Pete, 33701" Saint Petersburg, Russia, both flagged), a
 // name needing ø, ı or ł followed only by a continent ("Tromso, Europe" is the island, flagged), and a Polish name typed
 // alone (with no country only two spellings are asked, the Nordic first: "Kolobrzeg" isn't found, "Glogow" is a
-// Bulgarian village); and the ambiguous bare names
+// Bulgarian village), "San Sebastian" with a Spanish region other than its own ("San Sebastian, Canary Islands, Spain" is
+// Donostia, flagged: a native name holds when its country is typed), Dutch postal codes ("1012 AB" reads AB as Alberta,
+// flagged); and the ambiguous bare names
 // Newcastle, Victoria, Hong Kong, St Andrews, St Malo / Saint Malo (Manitoba, or a French village: Open-Meteo
 // gives Saint-Malo itself no population), Prince Edward Island. Run: npm test
 import { test } from "node:test";
@@ -43,7 +45,7 @@ const NOTES: Record<string, string> = {
   "Venice, Italy, Europe": `"Venice, Italy, Europe" was read as Venice, Italy; "Europe" didn't match its state or country, so check this is the city you meant.`,
 };
 
-test("city lookup: 703 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 718 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -70,7 +72,7 @@ test("city lookup: 703 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 703);
+  assert.equal(CASES.length, 718);
   assert.deepEqual(wrong, []);
 });
 
