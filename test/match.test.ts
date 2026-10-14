@@ -452,6 +452,85 @@ test("one place under two records at one spot is one place, not a restaurant the
   assert.deepEqual(planDay([hall, gardens] as any).map((s) => s.place), ["Denver Botanic Gardens"]);
 });
 
+test("where OpenStreetMap can't be asked about an area holding a place abroad, its places decide, the answer isn't kept, and an empty one says try again (pass 53)", async () => {
+  const filed = (p: any, country_code: string) => ({ ...p, properties: { ...p.properties, geocode: { country_code } } });
+  // Every area's places within reach are filed as `codes` (Kreuzlingen's kind: Konstanz's places reach over its areas).
+  const areas = (codes: string[], hood: (i: number) => string | null = () => "Somewhere") => (c: Call) => {
+    if (!isPlaces(c) || c.params.get("filter.tags")) return standardQloo()(c);
+    const p = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+    return { body: { results: { entities: codes.map((cc, i) => filed(place(`b${i}${p[2]}`, `Spot ${i}`, hood(i), +p[2], +p[1], ["Bar"], ["Evening"]), cc)) } } };
+  };
+  const osm = (countrycode: string) => ({ body: { features: [{ properties: { district: "OSM Place", countrycode } }] } });
+  const search = (kv = memoryKV().kv, budget = new Budget(48)) => matchNeighborhoods(ENV(kv), budget, "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
+  // Photon down and most places abroad: "try again", not "all across the border, try another city" (Kreuzlingen's
+  // Egelshofen is Swiss).
+  let m = mockFetch((c) => (c.host === "photon.komoot.io" ? { status: 503, body: {} } : areas(["MX", "MX", "US"])(c)));
+  try {
+    await assert.rejects(search(), (e: AppError) => e.status === 502 && /OpenStreetMap couldn't be asked this time/.test(e.message) && /in another country: Mexico/.test(e.message));
+  } finally {
+    m.restore();
+  }
+  // Photon down and most places at home: shown, not kept for the day; Photon up: kept.
+  for (const [what, photon, degraded] of [["Photon down", { status: 503, body: {} }, true], ["Photon up", osm("US"), false]] as const) {
+    m = mockFetch((c) => (c.host === "photon.komoot.io" ? photon : areas(["MX", "US", "US"])(c)));
+    try {
+      const r = await search();
+      assert.ok(r.neighborhoods.length > 0, what);
+      assert.equal(r.degraded, degraded, what);
+    } finally {
+      m.restore();
+    }
+  }
+  // The request's calls run low at the border check: 3 are kept for the area names and the answer's cache, the areas
+  // not asked about are judged by their places, and the answer isn't kept.
+  const budget = new Budget(48);
+  let squeezed = false;
+  m = mockFetch((c) => {
+    if (c.host !== "photon.komoot.io") return areas(["MX", "US", "US"])(c);
+    if (!squeezed) (squeezed = true), (budget.max = budget.used + 5);
+    return osm("US");
+  });
+  try {
+    const r = await search(memoryKV().kv, budget);
+    assert.equal(m.calls.filter((c) => c.host === "photon.komoot.io").length, 4, "3 at once, then 1 more while 4 are left");
+    assert.equal(r.degraded, true);
+    assert.equal(budget.left(), 3);
+  } finally {
+    m.restore();
+  }
+  // An area asked about at the border is named from that answer: not asked again when the names cache can't be written,
+  // and the cache isn't read again when no other area needs a name.
+  const { kv } = memoryKV({ failPuts: true });
+  let namesRead = 0;
+  const counted = { ...(kv as any), get: (k: string, t?: any) => (k.startsWith("names4:") && namesRead++, (kv as any).get(k, t)) } as KVNamespace;
+  let first = true;
+  m = mockFetch((c) => {
+    if (c.host === "photon.komoot.io") return osm("US");
+    if (!isPlaces(c) || c.params.get("filter.tags")) return areas([])(c);
+    const mine = first;
+    first = false;
+    return areas(mine ? ["MX", "US", "US"] : ["US"], () => (mine ? null : "Somewhere"))(c);
+  });
+  try {
+    const r = await search(counted);
+    assert.ok(r.neighborhoods.some((h) => h.name === "OSM Place"), JSON.stringify(r.neighborhoods.map((h) => h.name)));
+    assert.equal(m.calls.filter((c) => c.host === "photon.komoot.io").length, 1);
+    assert.equal(namesRead, 1);
+  } finally {
+    m.restore();
+  }
+  // OpenStreetMap's country is compared as a country: a territory's code and its country's are one (San Juan, Puerto
+  // Rico, and the US).
+  const sanJuan = { ...AUSTIN, name: "San Juan", admin1: "San Juan", country: undefined, country_code: "PR" };
+  m = mockFetch((c) => (c.host === "geocoding-api.open-meteo.com" ? { body: { results: [sanJuan] } } : c.host === "photon.komoot.io" ? osm("US") : areas(["DO", "US", "US"])(c)));
+  try {
+    const r = await search();
+    assert.ok(!r.trace.some((t) => /^Left out \d+ areas? across the border/.test(t.detail)), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
+  }
+});
+
 test("Qloo's locality is named by its own name first: Montreal's is \"Island of Montreal\", disambiguated just \"Canada\" (live)", async () => {
   const m = mockFetch(standardQloo({ heat: () => ({ ...heatmap(AUSTIN.latitude, AUSTIN.longitude), query: { localities: { filter: [{ name: "Island of Montreal", disambiguation: "Canada", location: { lat: AUSTIN.latitude, lon: AUSTIN.longitude } }] } } }) }));
   try {
@@ -506,14 +585,17 @@ test("only the country acts: an area whose places Qloo files mostly abroad is le
     });
     try {
       const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
-      assert.equal(r.trace.some((t) => /across the border/.test(t.detail)), kept === false, what);
+      assert.equal(r.trace.some((t) => /^Left out 1 area across the border/.test(t.detail)), kept === false, what);
+      // A place abroad left out of an area that stays is said too (pass 53: Beausoleil's went unsaid).
+      if (kept !== false) assert.ok(r.trace.some((t) => t.step === "Filter" && t.detail === "Left out 1 place across the border from the areas shown"), `${what}: ${JSON.stringify(r.trace.map((t) => t.detail))}`);
     } finally {
       mm.restore();
     }
   }
   // An area with places on both sides is where OpenStreetMap puts its centre (pass 52: Kreuzlingen's Swiss areas, most of
   // whose places within reach are Konstanz's; Juárez's riverside, which is El Paso's), asked only for such an area.
-  for (const [what, osmCountry, placesAt, dropped] of [["Kreuzlingen's kind", "US", ["MX", "MX", "US"], false], ["El Paso's riverside kind", "MX", ["US", "US", "MX"], true]] as const) {
+  // An area all of whose places within reach are abroad is asked too (pass 53: the code asks for any place abroad).
+  for (const [what, osmCountry, placesAt, dropped] of [["Kreuzlingen's kind", "US", ["MX", "MX", "US"], false], ["El Paso's riverside kind", "MX", ["US", "US", "MX"], true], ["all its places abroad", "US", ["MX", "MX", "MX"], false]] as const) {
     let firstArea = true;
     const om = mockFetch((c) => {
       if (c.host === "photon.komoot.io") return { body: { features: [{ properties: { district: "OSM Place", countrycode: osmCountry } }] } };
@@ -1962,8 +2044,11 @@ test("a noted name is searched a second time only while the request has calls to
     const fresh = await run(48);
     assert.equal(fresh.resolved?.[0]?.as, "Succession");
     assert.deepEqual(asked.slice(0, 2), ["Succession (TV series)", "Succession"]);
-    await run(22);
-    assert.deepEqual(asked.filter((a) => a.startsWith("Succession")), ["Succession (TV series)"], "nearly spent: no second search");
+    // 22 calls are kept for the steps after the interests (5 go to the city and the first search here).
+    await run(27);
+    assert.deepEqual(asked.filter((a) => a.startsWith("Succession")), ["Succession (TV series)"], "22 left: no second search");
+    await run(28);
+    assert.deepEqual(asked.filter((a) => a.startsWith("Succession")), ["Succession (TV series)", "Succession"], "23 left: searched");
   } finally {
     m.restore();
   }

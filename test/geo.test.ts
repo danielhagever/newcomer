@@ -1,10 +1,10 @@
-// City lookup against 669 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 694 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
 // "Windsor, Berkshire" (filed under Windsor and Maidenhead: Windsor, Ontario, flagged), "Derry, Ireland" (filed as
-// Londonderry), "Lorenskog" (no Lørenskog at all), "Ennis" and "Cobh" alone (the geocoder ranks Surprise,
-// Arizona, and Cobham first; with the county they work: a name alone is never preferred, as "Brussel" is Brussels and
+// Londonderry), "Lorenskog" (no Lørenskog at all), "Ennis", "Cobh" and "Chelm" alone (the geocoder ranks Surprise,
+// Arizona, Cobham and Chelmsford first; with the county they work: a name alone is never preferred, as "Brussel" is Brussels and
 // "Derry" Londonderry), "Bodo" alone (Bodo in Chad is a town of that name), a native city name with a region
 // that isn't its country ("Roma, Lazio"), "Newcastle, North East England" (the geocoder's Newcastle upon Tyne goes by
 // that name only: an alias reaches it from "Newcastle, UK" or "Newcastle, England"), "Ayvalik, Turkey" and "Bakirkoy,
@@ -23,7 +23,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { cityCenter, cityRadiusKm } from "../src/city.ts";
+import { cityCenter, cityRadiusKm, readNote } from "../src/city.ts";
 import { Budget } from "../src/limits.ts";
 import { memoryKV } from "./mock.ts";
 
@@ -31,8 +31,15 @@ const FIX: Record<string, unknown[]> = Object.fromEntries(
   Object.entries(JSON.parse(readFileSync(new URL("./geo-fixtures.json", import.meta.url), "utf8")) as Record<string, unknown[]>).map(([k, v]) => [decodeURIComponent(k), v]),
 );
 const CASES: [string, string, string | null][] = JSON.parse(readFileSync(new URL("./geo-cases.json", import.meta.url), "utf8"));
+// What some answers say: a direction dropped and a part set aside are both said, the part set aside not as fitting
+// (pass 53: "West Wales" went unsaid).
+const NOTES: Record<string, string> = {
+  "Newport, West Wales, Cymru": `"Newport, West Wales, Cymru" was read as Newport, Wales; "West Wales, Cymru" fit only as "Wales", so check this is the city you meant.`,
+  "Newport, West Wales": `"Newport, West Wales" was read as Newport, Wales; "West Wales" fit only as "Wales", so check this is the city you meant.`,
+  "Venice, Italy, Europe": `"Venice, Italy, Europe" was read as Venice, Italy; "Europe" didn't match its state or country, so check this is the city you meant.`,
+};
 
-test("city lookup: 669 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 694 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -53,12 +60,13 @@ test("city lookup: 669 realistic inputs land on the right city, and only real mi
       const p = await cityCenter(memoryKV().kv, new Budget(48), typed);
       const got = p ? p.name : "NULL (not placed)";
       if (got !== want || (p?.unmatched ?? null) !== note) wrong.push(`${typed} -> ${got}${p?.unmatched ? ` [note ${p.unmatched}]` : ""}, want ${want}${note ? ` [note ${note}]` : ""}`);
+      if (typed in NOTES && (!p || readNote(typed, p) !== NOTES[typed])) wrong.push(`${typed} says ${p && readNote(typed, p)}`);
     }
   } finally {
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 669);
+  assert.equal(CASES.length, 694);
   assert.deepEqual(wrong, []);
 });
 

@@ -32,18 +32,19 @@ async function reverseName(lat: number, lon: number): Promise<{ n: string[]; c?:
 // Names (and the country) for many map cells with one KV read and one KV write per city. Lookups run three at a time
 // (Photon lost 2 to 4 of 6 at once, measured) and stop when the request's budget runs low (keep `reserve` units for
 // the steps after naming). A lookup Photon didn't answer is counted as failed, not as a spot without a name, and isn't
-// kept.
+// kept; it and a lookup not made for the budget are listed as unanswered.
 export async function namesFor(
   cache: KVNamespace,
   budget: Budget,
   cityKey: string,
   cells: { lat: number; lon: number }[],
   reserve: number,
-): Promise<{ names: Map<string, string[]>; countries: Map<string, string>; missing: number; failed: number }> {
+): Promise<{ names: Map<string, string[]>; countries: Map<string, string>; missing: number; failed: number; unanswered: Set<string> }> {
   const key = `names4:${cityKey.toLowerCase()}`; // names4: with the cell's country (2026-10-14)
   const known: Record<string, { n: string[]; c?: string }> = (await kvGet(cache, budget, key)) ?? {};
   const want = [...new Set(cells.map((c) => cellKey(c.lat, c.lon)))].filter((k) => !(k in known));
   const fresh: Record<string, { n: string[]; c?: string }> = {};
+  const unanswered = new Set(want);
   let failed = 0;
   for (let i = 0; i < want.length; i += 3) {
     const batch = want.slice(i, i + 3).filter(() => budget.left() > reserve + 1 && budget.take());
@@ -52,7 +53,7 @@ export async function namesFor(
     batch.forEach((k, j) => {
       const g = got[j];
       if (g === null) failed++;
-      else if (g.n.length || g.c) fresh[k] = g;
+      else if ((unanswered.delete(k), g.n.length || g.c)) fresh[k] = g;
     });
   }
   if (Object.keys(fresh).length) await kvPut(cache, budget, key, { ...known, ...fresh }, 60 * 60 * 24 * 30);
@@ -66,7 +67,7 @@ export async function namesFor(
     else missing++;
     if (all[k]?.c) countries.set(k, all[k].c!);
   }
-  return { names, countries, missing, failed };
+  return { names, countries, missing, failed, unanswered };
 }
 
 export { cellKey };

@@ -127,7 +127,10 @@ const choice = (e: Entity): Choice => ({ id: e.id, name: label(e), type: TYPE_WO
 
 const term = (it: Interest) => it.query ?? it.name;
 
-const SPARE_FOR_NAMES = 20;
+// Calls kept for the steps after the interests: the map, the places, the border check and the area names (measured: 8
+// films with a note used 41 of 44 and left 3 areas unnamed; the border check, pass 52, reads and writes the names
+// cache once more).
+const SPARE_FOR_NAMES = 22;
 
 async function resolveEntity(q: Qloo, it: Interest, type?: string): Promise<Resolved | null> {
   const found = await q.search(forSearch(term(it)), type, 5);
@@ -493,14 +496,16 @@ export async function matchNeighborhoods(
     hoods = hoods.filter((h) => !airport(h));
     trace.push({ step: "Filter", detail: `Left out ${atAirports} area${atAirports === 1 ? "" : "s"} at an airport` });
   }
-  // An area's country is where it is: OpenStreetMap at its centre, asked only for an area holding places on both sides.
-  // Neither its places within reach (pass 52: Kreuzlingen's Swiss areas were Konstanz's, Windsor's riverfront
-  // Detroit's) nor those inside its square (pass 51: one bridge made El Paso's riverside Juárez's) can tell. Where
-  // OpenStreetMap doesn't answer, most places within reach decide.
-  const mixed = hoods.filter((h) => [...h.evidence, ...h.matches].some((e) => !home(e)));
-  const osm = mixed.length ? await namesFor(env.CACHE, budget, center.name, mixed, 3) : undefined;
-  if (osm?.failed) degraded = true; // decided by the places this time: not kept for the day
+  // An area's country is where it is: OpenStreetMap at its centre, asked for any area holding a place abroad. Neither
+  // its places within reach (pass 52: Kreuzlingen's Swiss areas were Konstanz's, Windsor's riverfront Detroit's) nor
+  // those inside its square (pass 51: one bridge made El Paso's riverside Juárez's) can tell. Where OpenStreetMap gives
+  // no country, most places within reach decide; where it couldn't be asked this time (no answer, or the request's
+  // calls ran low), they decide too, but the answer isn't kept for the day and isn't called final (pass 53).
+  const withAbroad = hoods.filter((h) => [...h.evidence, ...h.matches].some((e) => !home(e)));
+  const osm = withAbroad.length ? await namesFor(env.CACHE, budget, center.name, withAbroad, 3) : undefined;
   const osmCountry = (h: Neighborhood) => osm?.countries.get(cellKey(h.lat, h.lon));
+  const unasked = (h: Neighborhood) => !!osm?.unanswered.has(cellKey(h.lat, h.lon));
+  if (withAbroad.some(unasked)) degraded = true;
   const placesAbroad = (h: Neighborhood) => {
     const at = osmCountry(h);
     if (at) return nation(at) !== nation(center.country);
@@ -512,10 +517,17 @@ export async function matchNeighborhoods(
     hoods = hoods.filter((h) => !placesAbroad(h));
     const where = [...new Set(across.flatMap((h) => (osmCountry(h) ? [osmCountry(h)!] : [...h.evidence, ...h.matches].filter((e) => !home(e)).map((e) => e.countryCode!)).map(countryName)))].join(" and ");
     trace.push({ step: "Filter", detail: `Left out ${across.length} area${across.length === 1 ? "" : "s"} across the border (in another country: ${where})` });
+    // Judged by their places only, as OpenStreetMap couldn't be asked: asking again may show them (pass 53: Kreuzlingen's).
+    if (!hoods.length && across.some(unasked))
+      throw new AppError(`Most places Qloo files around the areas it ranks highest for ${center.name} are across the border (in another country: ${where}), and OpenStreetMap couldn't be asked this time where the areas themselves are. Please try again later, or with fewer tastes.`, 502);
     // Not "try again later": every area Qloo ranks is another country's, which asking again won't change.
     if (!hoods.length) throw new AppError(`The ${across.length === 1 ? "area" : "areas"} Qloo ranks highest around ${center.name} for these tastes ${across.length === 1 ? "is" : "are all"} across the border (in another country: ${where}), so none is shown as the city's. Try a nearby city or other tastes.`, 404);
   }
+  // Places abroad within reach of an area that stays are left out of it, and said (pass 53: Beausoleil's Monaco places went
+  // unsaid).
+  const leftOut = new Set(hoods.flatMap((h) => [...h.evidence, ...h.matches].filter((e) => !home(e)).map((e) => e.id)));
   for (const h of hoods) (h.evidence = h.evidence.filter(home)), (h.matches = h.matches.filter(home));
+  if (leftOut.size) trace.push({ step: "Filter", detail: `Left out ${leftOut.size} place${leftOut.size === 1 ? "" : "s"} across the border from the areas shown` });
   // Where Qloo files most places inside an area under the city's own name and the area is at the city's centre, it is
   // the city centre (live: Melbourne's suburb "Melbourne" is its CBD; dropping that name let Fitzroy name it).
   const cityName = center.name.split(",")[0].trim();
@@ -534,8 +546,10 @@ export async function matchNeighborhoods(
   for (const h of hoods) h.name = says(h.name) ? clean(h.name) : h.name && cityWords.has(cityKey(clean(h.name))) && km(h, center) <= 1.5 ? centreName : "";
   const unnamed = hoods.filter((h) => !h.name);
   if (unnamed.length) {
-    // The areas asked about their country above already have OpenStreetMap's names.
-    const r = await namesFor(env.CACHE, budget, center.name, unnamed.filter((h) => !osm?.names.has(cellKey(h.lat, h.lon))), 3);
+    // The areas asked about their country above already have OpenStreetMap's names (and the names cache isn't read again
+    // when no other area needs them).
+    const ask = unnamed.filter((h) => !osm?.names.has(cellKey(h.lat, h.lon)));
+    const r = ask.length ? await namesFor(env.CACHE, budget, center.name, ask, 3) : { names: new Map<string, string[]>(), failed: 0 };
     for (const h of unnamed) {
       const osmName = (osm?.names.get(cellKey(h.lat, h.lon)) ?? r.names.get(cellKey(h.lat, h.lon)) ?? []).find(says);
       h.name = osmName ? clean(osmName) : byPlaces([...h.evidence, ...h.matches]);
