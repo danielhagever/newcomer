@@ -611,7 +611,7 @@ test("what the naming says is said of the areas shown, and an empty OpenStreetMa
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
     assert.ok(r.neighborhoods.length > 0);
-    assert.ok(r.trace.some((t) => t.detail === `Named the areas from Qloo's place data (the neighborhood of the places inside each area); the places within reach for ${r.neighborhoods.length} without either`), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(r.trace.some((t) => t.detail === `Named the areas from Qloo's place data (the neighborhood of the places inside each area); the places within reach for ${r.neighborhoods.length}`), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     m.restore();
   }
@@ -722,7 +722,7 @@ test("when no area can be named, \"try again\" only if OpenStreetMap couldn't be
   };
   const search = () => matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
   for (const [what, photon, status, says] of [
-    ["OpenStreetMap down", { status: 503, body: {} }, 502, /none of the top areas could be named this time \(OpenStreetMap didn't answer\)\. Please try again later\.$/],
+    ["OpenStreetMap down", { status: 503, body: {} }, 502, /none of the top areas could be named this time \(OpenStreetMap didn't answer, or the search ran out of lookups\)\. Please try again later, or with fewer tastes\.$/],
     ["OpenStreetMap with no names", { body: { features: [] } }, 404, /none of the top areas has a neighborhood name in Qloo or OpenStreetMap\. Try a nearby city\.$/],
   ] as const) {
     const m = mockFetch((c) => (c.host === "photon.komoot.io" ? (photon as any) : nameless(c)));
@@ -731,6 +731,33 @@ test("when no area can be named, \"try again\" only if OpenStreetMap couldn't be
     } finally {
       m.restore();
     }
+  }
+  // One area OpenStreetMap didn't answer for, the rest answered with no names: still "try again".
+  let first = true;
+  let m = mockFetch((c) => {
+    if (c.host !== "photon.komoot.io") return nameless(c);
+    const down = first;
+    first = false;
+    return down ? { status: 503, body: {} } : { body: { features: [] } };
+  });
+  try {
+    await assert.rejects(search(), (e: AppError) => e.status === 502);
+  } finally {
+    m.restore();
+  }
+  // Areas named from the places within reach while OpenStreetMap is down are shown, not counted as left out.
+  m = mockFetch((c) => {
+    if (c.host === "photon.komoot.io") return { status: 503, body: {} };
+    if (!isPlaces(c) || c.params.get("filter.tags")) return standardQloo()(c);
+    const p = (c.params.get("filter.location") ?? "").match(/POINT\(([-\d.]+) ([-\d.]+)\)/)!;
+    return { body: { results: { entities: [place(`i${p[2]}${p[1]}`, "Inside", null, +p[2], +p[1], ["Bar"], ["Evening"]), place(`o${p[2]}${p[1]}`, "Outside", `Near ${p[2]} ${p[1]}`, +p[2] + 0.012, +p[1], ["Bar"], ["Evening"])] } } };
+  });
+  try {
+    const r = await search();
+    assert.ok(r.neighborhoods.length > 0);
+    assert.ok(!r.trace.some((t) => /left out/.test(t.detail) && t.step === "Name"), JSON.stringify(r.trace.map((t) => t.detail)));
+  } finally {
+    m.restore();
   }
 });
 

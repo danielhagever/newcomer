@@ -298,7 +298,7 @@ function respellings(name: string, nordic: boolean, turkish: boolean, polish: bo
 }
 
 export async function cityCenter(cache: KVNamespace, budget: Budget, city: string): Promise<Place | null> {
-  const key = `city36:${city.toLowerCase()}`; // city36: saints always asked hyphenated, Macao, USVI
+  const key = `city37:${city.toLowerCase()}`; // city37: a space after "St." typed without one
   const hit = await kvGet(cache, budget, key);
   if (hit) return hit as Place;
   // The typed parts, cleaned once before any step reads them: "Newcastle,UK" and "Newcastle , UK" are "Newcastle, UK";
@@ -311,8 +311,10 @@ export async function cityCenter(cache: KVNamespace, budget: Budget, city: strin
   // leaves: "Riga, LV-1050" is Latvia's code). A region of only such words is kept: it fits nothing and is flagged
   // ("Portland, 04101" and "Cambridge, CB2 1TN" aren't checked; pass 52 dropped the first unflagged).
   const zipGap = city.split(",").slice(1).join(",").split(/[^\p{L}\p{N}]+/u).some((w) => /\p{L}/u.test(w) && !/\d/.test(w));
+  // A space after "St.", "Ste.", "Mt." and "Ft." when none was typed ("St.Louis, MO" wasn't found: pass 61).
   const typedList = city
     .replace(/[\u2018\u2019\u02bb\u02bc\u00b4`]/g, "'")
+    .replace(/\b(st|ste|mt|ft)\.(?=\p{L})/giu, "$1. ")
     .split(",")
     .map((x, i) => (i ? x.replace(/&/g, " and ").replace(zipGap ? /[\p{L}\p{N}]*\d[\p{L}\p{N}]*/gu : /$^/, " ").replace(/(?<![\p{L}\p{N}])-+|-+(?![\p{L}\p{N}])/gu, " ").replace(/[^\p{L}\p{M}\p{N}\s.'-]/gu, " ") : x).replace(/\s+/g, " ").trim())
     .filter((x) => /[\p{L}\p{N}]/u.test(x))

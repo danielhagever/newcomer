@@ -1,4 +1,4 @@
-// City lookup against 779 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 789 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
@@ -36,9 +36,12 @@
 // Martin" Pont-Sainte-Maxence; flagged), regions written with "St." ("Castries, St Lucia", "Jamestown, St Helena":
 // flagged), an Italian province code without a comma ("Schio VI" is in Japan, flagged), a name Open-Meteo knows only in plain letters
 // ("Bielsko-Biała" isn't found; "Bielsko-Biala" is), a region in its own language that no list holds ("Düsseldorf,
-// Nordrhein-Westfalen", "Bordeaux, Nouvelle-Aquitaine": the right city, flagged); and the ambiguous bare names
-// Newcastle, Victoria, Hong Kong, St Andrews, St Malo / Saint Malo (Manitoba, or a French village: Open-Meteo
-// gives Saint-Malo itself no population), Prince Edward Island. Run: npm test
+// Nordrhein-Westfalen", "Bordeaux, Nouvelle-Aquitaine": the right city, flagged), a French "La" before a territory
+// ("Saint-Denis, La Réunion" is read as Louisiana and Réunion: the right place, flagged), a saint island whose hyphenated
+// name is also a village ("Saint Barthélemy" is a village in Haute-Saône, unflagged, since the hyphenated form is always
+// asked: "St Barts" and "Gustavia, St Barth" are the island), bare saint names a bigger city's name starts with or a
+// country's capital goes by ("Saint Lo" is St. Louis, "Saint George" Freetown; with the country they are right); and the
+// ambiguous bare names Newcastle, Victoria, Hong Kong, St Andrews, Prince Edward Island. Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -58,7 +61,7 @@ const NOTES: Record<string, string> = {
   "Venice, Italy, Europe": `"Venice, Italy, Europe" was read as Venice, Italy; "Europe" didn't match its state or country, so check this is the city you meant.`,
 };
 
-test("city lookup: 779 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 789 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -85,7 +88,7 @@ test("city lookup: 779 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 779);
+  assert.equal(CASES.length, 789);
   assert.deepEqual(wrong, []);
 });
 

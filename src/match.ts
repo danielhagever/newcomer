@@ -571,7 +571,7 @@ export async function matchNeighborhoods(
   const named = hoods.filter((h) => h.name);
   hoods = mergeByName(named, mode).slice(0, 5);
   // "Try again" only when OpenStreetMap couldn't be asked; when it answered with no names, asking again won't help (pass 60).
-  if (!hoods.length && unknown) throw failAt(`Qloo scored ${center.name}, but none of the top areas could be named this time (OpenStreetMap didn't answer). Please try again later.`, 502);
+  if (!hoods.length && unknown) throw failAt(`Qloo scored ${center.name}, but none of the top areas could be named this time (OpenStreetMap didn't answer, or the search ran out of lookups). Please try again later, or with fewer tastes.`, 502);
   if (!hoods.length) throw failAt(`Qloo scored ${center.name}, but none of the top areas has a neighborhood name in Qloo or OpenStreetMap. Try a nearby city.`, 404);
   // What is said is said of the areas shown (pass 55: "OpenStreetMap for 7" with 5 shown).
   const shownHere = named.filter((h) => hoods.some((s) => articleless(s.name) === articleless(h.name)));
@@ -580,7 +580,7 @@ export async function matchNeighborhoods(
   const from = (set: Set<Neighborhood>) => new Set(shownHere.filter((h) => set.has(h)).map((h) => articleless(h.name))).size;
   const fromOsm = from(byOsm);
   const fromReach = from(byReach); // pass 60: Stratford's area was "Chalk Farm", 11 km off, while the trace said "inside"
-  trace.push({ step: "Name", detail: `Named the areas from Qloo's place data (the neighborhood of the places inside each area)${fromOsm ? `; OpenStreetMap for ${fromOsm} without one` : ""}${fromReach ? `; the places within reach for ${fromReach} without either` : ""}` });
+  trace.push({ step: "Name", detail: `Named the areas from Qloo's place data (the neighborhood of the places inside each area)${fromOsm ? `; OpenStreetMap for ${fromOsm} without one` : ""}${fromReach ? `; the places within reach for ${fromReach}` : ""}` });
 
   // 5. Your kinds of places (found before the ranking) go under the neighborhood within reach. Qloo's
   // city filter reaches a bit past the city: a Manhattan bar must not be listed under Williamsburg.
