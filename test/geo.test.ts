@@ -1,4 +1,4 @@
-// City lookup against 789 realistic ways people type tour cities (test/geo-cases.json), each with the
+// City lookup against 793 realistic ways people type tour cities (test/geo-cases.json), each with the
 // city it should land on and whether the answer should flag what followed the comma. The geocoder's real
 // answers were recorded once (test/geo-fixtures.json, trimmed), so this runs offline. Not included, because
 // Open-Meteo's answer doesn't hold the right place: Orange County, "Stoke, UK", "Kingston, UK", "St Johns, NL",
@@ -30,10 +30,10 @@
 // Nadu": the namesake elsewhere, flagged), a namesake of an old name without people typed with its state ("Danzig, ND" is
 // Gdańsk, flagged), a "Mt." name the geocoder doesn't know ("Mt. Washington, KY" is Mt. Pleasant, South Carolina,
 // flagged), "City of X" in another language ("Ciudad de Guatemala" is Los Angeles, "Ville de Monaco" Phnom Penh, flagged),
-// a whole name that is also a hamlet's ("Roma Texas" is a village of that name in Mexico, unflagged), a hyphenated saint
-// or "Fort de" name typed with spaces where the geocoder's first answer is elsewhere ("Saint Lambert, QC" and "Saint
-// Sauveur, QC" are in France, "Saint Albans, UK" in Australia, "Fort de France, Martinique" in Indonesia, "Pont Saint
-// Martin" Pont-Sainte-Maxence; flagged), regions written with "St." ("Castries, St Lucia", "Jamestown, St Helena":
+// a whole name that is also a hamlet's ("Roma Texas" is a village of that name in Mexico, unflagged), a saint name the
+// geocoder files with "St" and no dot, typed otherwise ("Saint Albans, UK" and "St. Albans, England" are in Australia,
+// "St. Ives, Cornwall" too, "Ste. Marie, QC" in Réunion; flagged), "Mt" for the French "Mont" ("Mt Tremblant, QC" isn't
+// found), regions written with "St." ("Castries, St Lucia", "Jamestown, St Helena":
 // flagged), an Italian province code without a comma ("Schio VI" is in Japan, flagged), a name Open-Meteo knows only in plain letters
 // ("Bielsko-Biała" isn't found; "Bielsko-Biala" is), a region in its own language that no list holds ("Düsseldorf,
 // Nordrhein-Westfalen", "Bordeaux, Nouvelle-Aquitaine": the right city, flagged), a French "La" before a territory
@@ -61,7 +61,7 @@ const NOTES: Record<string, string> = {
   "Venice, Italy, Europe": `"Venice, Italy, Europe" was read as Venice, Italy; "Europe" didn't match its state or country, so check this is the city you meant.`,
 };
 
-test("city lookup: 789 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
+test("city lookup: 793 realistic inputs land on the right city, and only real mismatches are flagged", async () => {
   const original = globalThis.fetch;
   const missing = new Set<string>();
   globalThis.fetch = (async (input: any) => {
@@ -88,7 +88,7 @@ test("city lookup: 789 realistic inputs land on the right city, and only real mi
     globalThis.fetch = original;
   }
   assert.deepEqual([...missing], [], "every geocoder call has a recorded answer");
-  assert.equal(CASES.length, 789);
+  assert.equal(CASES.length, 793);
   assert.deepEqual(wrong, []);
 });
 

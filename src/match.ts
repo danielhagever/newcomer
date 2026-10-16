@@ -580,7 +580,14 @@ export async function matchNeighborhoods(
   const from = (set: Set<Neighborhood>) => new Set(shownHere.filter((h) => set.has(h)).map((h) => articleless(h.name))).size;
   const fromOsm = from(byOsm);
   const fromReach = from(byReach); // pass 60: Stratford's area was "Chalk Farm", 11 km off, while the trace said "inside"
-  trace.push({ step: "Name", detail: `Named the areas from Qloo's place data (the neighborhood of the places inside each area)${fromOsm ? `; OpenStreetMap for ${fromOsm} without one` : ""}${fromReach ? `; the places within reach for ${fromReach}` : ""}` });
+  // Not "from Qloo's place data" when Qloo named none of the areas shown (pass 62).
+  const byQloo = new Set(shownHere.filter((h) => !byOsm.has(h) && !byReach.has(h)).map((h) => articleless(h.name))).size;
+  trace.push({
+    step: "Name",
+    detail: byQloo
+      ? `Named the areas from Qloo's place data (the neighborhood of the places inside each area)${fromOsm ? `; OpenStreetMap for ${fromOsm} without one` : ""}${fromReach ? `; the places within reach for ${fromReach}` : ""}`
+      : `Named the areas from ${[fromOsm && `OpenStreetMap (${fromOsm})`, fromReach && `the places within reach (${fromReach})`].filter(Boolean).join(" and ")}, Qloo's place data having no neighborhood for them`,
+  });
 
   // 5. Your kinds of places (found before the ranking) go under the neighborhood within reach. Qloo's
   // city filter reaches a bit past the city: a Manhattan bar must not be listed under Williamsburg.

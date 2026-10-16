@@ -515,6 +515,7 @@ test("where OpenStreetMap can't be asked about an area holding a place abroad, i
   try {
     const r = await search(counted);
     assert.ok(r.neighborhoods.some((h) => h.name === "OSM Place"), JSON.stringify(r.neighborhoods.map((h) => h.name)));
+    assert.ok(r.trace.some((t) => t.detail === "Named the areas from Qloo's place data (the neighborhood of the places inside each area); OpenStreetMap for 1 without one"), JSON.stringify(r.trace.map((t) => t.detail)));
     assert.equal(m.calls.filter((c) => c.host === "photon.komoot.io").length, 1);
     assert.equal(namesRead, 1);
   } finally {
@@ -597,7 +598,7 @@ test("what the naming says is said of the areas shown, and an empty OpenStreetMa
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
     assert.equal(r.neighborhoods.length, 5);
-    assert.ok(r.trace.some((t) => t.detail.endsWith("; OpenStreetMap for 5 without one")), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(r.trace.some((t) => t.detail === "Named the areas from OpenStreetMap (5), Qloo's place data having no neighborhood for them"), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     m.restore();
   }
@@ -611,7 +612,7 @@ test("what the naming says is said of the areas shown, and an empty OpenStreetMa
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
     assert.ok(r.neighborhoods.length > 0);
-    assert.ok(r.trace.some((t) => t.detail === `Named the areas from Qloo's place data (the neighborhood of the places inside each area); the places within reach for ${r.neighborhoods.length}`), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(r.trace.some((t) => t.detail === `Named the areas from the places within reach (${r.neighborhoods.length}), Qloo's place data having no neighborhood for them`), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     m.restore();
   }
@@ -649,7 +650,7 @@ test("OpenStreetMap's double values, merged names and a small map are said as th
   try {
     const r = await search();
     assert.equal(r.neighborhoods.length, 3);
-    assert.ok(r.trace.some((t) => t.detail.endsWith("; OpenStreetMap for 3 without one")), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(r.trace.some((t) => t.detail === "Named the areas from OpenStreetMap (3), Qloo's place data having no neighborhood for them"), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     m.restore();
   }
