@@ -598,7 +598,7 @@ test("what the naming says is said of the areas shown, and an empty OpenStreetMa
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
     assert.equal(r.neighborhoods.length, 5);
-    assert.ok(r.trace.some((t) => t.detail === "Named the areas from OpenStreetMap (5), Qloo's place data having no neighborhood for them"), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(r.trace.some((t) => t.detail === "Named the areas from OpenStreetMap (5), none of the places inside them having a neighborhood in Qloo's data"), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     m.restore();
   }
@@ -612,7 +612,7 @@ test("what the naming says is said of the areas shown, and an empty OpenStreetMa
   try {
     const r = await matchNeighborhoods(ENV(memoryKV().kv), new Budget(48), "Austin, Texas", [{ name: "Phoebe Bridgers", kind: "artist" }]);
     assert.ok(r.neighborhoods.length > 0);
-    assert.ok(r.trace.some((t) => t.detail === `Named the areas from the places within reach (${r.neighborhoods.length}), Qloo's place data having no neighborhood for them`), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(r.trace.some((t) => t.detail === `Named the areas from the places within reach (${r.neighborhoods.length}), none of the places inside them having a neighborhood in Qloo's data`), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     m.restore();
   }
@@ -650,7 +650,7 @@ test("OpenStreetMap's double values, merged names and a small map are said as th
   try {
     const r = await search();
     assert.equal(r.neighborhoods.length, 3);
-    assert.ok(r.trace.some((t) => t.detail === "Named the areas from OpenStreetMap (3), Qloo's place data having no neighborhood for them"), JSON.stringify(r.trace.map((t) => t.detail)));
+    assert.ok(r.trace.some((t) => t.detail === "Named the areas from OpenStreetMap (3), none of the places inside them having a neighborhood in Qloo's data"), JSON.stringify(r.trace.map((t) => t.detail)));
   } finally {
     m.restore();
   }
