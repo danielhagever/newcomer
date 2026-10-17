@@ -586,7 +586,7 @@ export async function matchNeighborhoods(
     step: "Name",
     detail: byQloo
       ? `Named the areas from Qloo's place data (the neighborhood of the places inside each area)${fromOsm ? `; OpenStreetMap for ${fromOsm} without one` : ""}${fromReach ? `; the places within reach for ${fromReach}` : ""}`
-      : `Named the areas from ${[fromOsm && `OpenStreetMap (${fromOsm})`, fromReach && `the places within reach (${fromReach})`].filter(Boolean).join(" and ")}, none of the places inside them having a neighborhood in Qloo's data`,
+      : `Named the areas from ${[fromOsm && `OpenStreetMap (${fromOsm})`, fromReach && `the places within reach (${fromReach})`].filter(Boolean).join(" and ")}, Qloo's places inside them giving no neighborhood name to use`,
   });
 
   // 5. Your kinds of places (found before the ranking) go under the neighborhood within reach. Qloo's
